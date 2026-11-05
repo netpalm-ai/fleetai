@@ -1,0 +1,32 @@
+{
+  "id": "JMD-07OCT-05",
+  "title": "Single '00:00:00 \u2013 00:05:00' block label shown for a 9:25 recording",
+  "severity": "P3 - Minor",
+  "status": "fixed",
+  "kind": "recurrent",
+  "kind_reason": "The same block-boundary labelling defect recurred on 12 October in a new form (one label repeated six times, now with a BST suffix), reported as JMD-12OCT-02, confirming the underlying fault was not fixed.",
+  "services": [
+    "annotated transcript"
+  ],
+  "context": "On 7 October, a 9:25 recording showed only one block label (00:00:00\u201300:05:00) despite the transcript content running to the end of the consultation. On 12 October the same defect appeared differently: six blocks all carrying the identical label '09:44:18 BST \u2013 09:49:18 BST' for an 8:06 recording (JMD-12OCT-02). The block-boundary logic should be investigated together with JMD-12OCT-01 and JMD-12OCT-02.",
+  "expected": "Block labels reflect the actual time ranges covered by each block, are unique and contiguous, together cover the full recording length, and match the recording start time.",
+  "repos": [
+    {
+      "name": "jarvismd-backend",
+      "path": "/Users/minh/repos/hba/jarvismd-backend",
+      "remote": "cto-hba/jarvismd-backend"
+    },
+    {
+      "name": "nlp-services",
+      "path": "/Users/minh/repos/hba/nlp-services",
+      "remote": "healthbridge-inc/nlp-services"
+    },
+    {
+      "name": "jmd-frontend",
+      "path": "/Users/minh/repos/hba/jmd-frontend",
+      "remote": "cto-hba/jmd-frontend"
+    }
+  ],
+  "report_status": "Open",
+  "solver_run_id": "run-3eb17502-4bc9-456d-a602-4f1966720e80"
+}

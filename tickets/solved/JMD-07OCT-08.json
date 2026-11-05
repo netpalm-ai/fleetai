@@ -1,0 +1,20 @@
+{
+  "id": "JMD-07OCT-08",
+  "title": "Exit survey Q1 'What drove the correction' options have no borders and do not look selectable",
+  "severity": "P3 - Minor",
+  "status": "fixed",
+  "kind": "new",
+  "kind_reason": "This ticket was first raised on 7 October 2026 and has not been reported as fixed or retested.",
+  "services": [],
+  "context": "In the exit survey Q1 follow-up ('What drove the correction required? Select all that apply'), options such as Misattribution, Wrong section, Too verbose, and Style or phrasing appear as plain unstyled text in their unselected state; only selected options become filled blue pills. Users may not realise the options are clickable or that multiple selections are possible. The proposed exit survey design (v1) shows each option as a bordered pill with an icon.",
+  "expected": "Every Q1 follow-up option has a visible border in its unselected state, a clearly distinct filled style when selected, visible hover and keyboard-focus states, and 'Other (please specify)' follows the same style; multi-select works correctly.",
+  "repos": [
+    {
+      "name": "jmd-frontend",
+      "path": "/Users/minh/repos/hba/jmd-frontend",
+      "remote": "cto-hba/jmd-frontend"
+    }
+  ],
+  "report_status": "Open",
+  "solver_run_id": "run-df6b4887-2f91-47b8-8793-c686a3ac34e0"
+}

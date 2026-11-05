@@ -4,3 +4,6 @@ __pycache__/
 .env
 tickets/list.pdf
 tickets/email.desc.txt
+tickets/solved/list.pdf
+tickets/solved/email.desc.txt
+tickets/runs/
