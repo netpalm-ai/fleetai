@@ -1,9 +1,13 @@
-"""Paths, ticket workflow, and the Cursor call."""
+"""Paths and ticket workflow."""
 
 from __future__ import annotations
 
+import fcntl
 import json
 import os
+import threading
+import uuid
+from contextlib import contextmanager
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -25,13 +29,95 @@ def load_local_env() -> None:
 
 load_local_env()
 
+
+def require_env(name: str) -> str:
+    value = (os.getenv(name) or "").strip()
+    if not value:
+        raise RuntimeError("{0} is required".format(name))
+    return value
+
+
+def require_env_int(name: str) -> int:
+    return int(require_env(name))
+
+
 TICKETS_DIR = ROOT / "tickets"
 PDF_PATH = TICKETS_DIR / "list.pdf"
 EMAIL_PATH = TICKETS_DIR / "email.desc.txt"
+ADDITIONAL_CONTEXT_PATH = TICKETS_DIR / "additional_context.pdf"
 TICKETS_PATH = TICKETS_DIR / "unsolved_tickets.json"
 SOLVED_DIR = TICKETS_DIR / "solved"
 RUNS_DIR = TICKETS_DIR / "runs"
+JOBS_DIR = TICKETS_DIR / "jobs"
 CONTEXT_PATH = ROOT / "codebase" / "code-context.md"
+ENGINEERING_PATH = ROOT / "codebase" / "engineering.md"
+LOCK_PATH = TICKETS_DIR / ".lock"
+VERSION = "0.1.0"
+_thread_lock = threading.RLock()
+_held = threading.local()
+_in_use = threading.Event()
+
+
+class WorkflowBusy(RuntimeError):
+    pass
+
+
+def workflow_busy() -> bool:
+    if _in_use.is_set():
+        return True
+    LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(LOCK_PATH, os.O_CREAT | os.O_RDWR)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        return False
+    except BlockingIOError:
+        return True
+    finally:
+        os.close(fd)
+
+
+@contextmanager
+def workflow_lock(blocking: bool = True):
+    depth = getattr(_held, "depth", 0)
+    if depth:
+        _held.depth = depth + 1
+        try:
+            yield
+        finally:
+            _held.depth -= 1
+        return
+    if not _thread_lock.acquire(blocking=blocking):
+        raise WorkflowBusy("workflow busy")
+    LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(LOCK_PATH, os.O_CREAT | os.O_RDWR)
+    try:
+        flags = fcntl.LOCK_EX if blocking else fcntl.LOCK_EX | fcntl.LOCK_NB
+        fcntl.flock(fd, flags)
+    except BlockingIOError:
+        os.close(fd)
+        _thread_lock.release()
+        raise WorkflowBusy("workflow busy")
+    _held.depth = 1
+    _in_use.set()
+    try:
+        yield
+    finally:
+        _held.depth = 0
+        _in_use.clear()
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        os.close(fd)
+        _thread_lock.release()
+
+
+def locked(fn):
+    def wrapped(*args, **kwargs):
+        with workflow_lock():
+            return fn(*args, **kwargs)
+
+    wrapped.__name__ = fn.__name__
+    wrapped.__doc__ = fn.__doc__
+    return wrapped
 
 UNRESOLVED = "unresolved"
 VERIFYING = "verifying"
@@ -46,26 +132,32 @@ FAILED = "failed"
 _STATUS = {name.lower(): name for name in TICKET_STATES}
 REQUIRED = ("title", "severity", "services", "context", "expected")
 TECH_FIELDS = ("id", "title", "severity", "services", "context", "expected")
-CURSOR_MODEL = (os.getenv("FLEETAI_CURSOR_MODEL") or "grok-4.6").strip()
-
-
 def product_cwd() -> Path:
-    raw = (os.getenv("FLEETAI_PRODUCT_ROOT") or "").strip()
-    if not raw:
-        raise RuntimeError("FLEETAI_PRODUCT_ROOT is required")
-    root = Path(raw)
+    root = Path(require_env("FLEETAI_PRODUCT_ROOT"))
     if not root.is_dir():
         raise RuntimeError("product root is missing: {0}".format(root))
     return root
 
 
-def code_context() -> str:
-    if not CONTEXT_PATH.is_file():
-        raise RuntimeError("missing code context: {0}".format(CONTEXT_PATH))
-    text = CONTEXT_PATH.read_text(encoding="utf-8").strip()
+def _read_required(path: Path, label: str) -> str:
+    if not path.is_file():
+        raise RuntimeError("missing {0}: {1}".format(label, path))
+    text = path.read_text(encoding="utf-8").strip()
     if not text:
-        raise RuntimeError("code context is empty: {0}".format(CONTEXT_PATH))
+        raise RuntimeError("{0} is empty: {1}".format(label, path))
     return text
+
+
+def code_context() -> str:
+    return _read_required(CONTEXT_PATH, "code context")
+
+
+def engineering_standard() -> str:
+    return _read_required(ENGINEERING_PATH, "engineering standard")
+
+
+def agent_context() -> str:
+    return "ENGINEERING STANDARD\n{0}\n\nCODE CONTEXT\n{1}".format(engineering_standard(), code_context())
 
 
 def product_areas() -> str:
@@ -91,30 +183,6 @@ def ticket_where(ticket: dict) -> str:
         repo.get("name", "") for repo in ticket.get("repos") or [] if isinstance(repo, dict)
     )
     return repos or ", ".join(ticket.get("services") or [])
-
-
-def run_cursor(prompt: str):
-    api_key = (os.getenv("CURSOR_API_KEY") or "").strip()
-    if not api_key:
-        raise SystemExit("CURSOR_API_KEY is required")
-    from cursor_sdk import Agent, AgentOptions, LocalAgentOptions, ModelParameterValue, ModelSelection
-
-    model = CURSOR_MODEL
-    if CURSOR_MODEL.startswith("grok-"):
-        model = ModelSelection(
-            id=CURSOR_MODEL,
-            params=[
-                ModelParameterValue(id="reasoning", value="high"),
-                ModelParameterValue(id="fast", value="true"),
-            ],
-        )
-    result = Agent.prompt(
-        prompt,
-        AgentOptions(api_key=api_key, model=model, local=LocalAgentOptions(cwd=str(product_cwd()))),
-    )
-    if result.status == "error":
-        raise RuntimeError("run failed: {0}".format(result.id))
-    return result
 
 
 def normalize_status(value: object, default: str | None = UNRESOLVED) -> str | None:
@@ -265,6 +333,13 @@ def save_tickets(tickets: list[dict], path: Path = TICKETS_PATH) -> None:
     path.write_text(json.dumps(tickets, indent=2) + "\n", encoding="utf-8")
 
 
+def find_ticket(ticket_id: str, path: Path = TICKETS_PATH, solved_dir: Path = SOLVED_DIR) -> dict | None:
+    ticket = next((item for item in load_tickets(path) if item["id"] == ticket_id), None)
+    if ticket is not None:
+        return ticket
+    return load_solved(solved_dir).get(ticket_id)
+
+
 def require_ticket(ticket_id: str, path: Path = TICKETS_PATH) -> dict:
     ticket = next((item for item in load_tickets(path) if item["id"] == ticket_id), None)
     if ticket is None:
@@ -300,12 +375,50 @@ def archive_solved(path: Path = TICKETS_PATH, solved_dir: Path = SOLVED_DIR, sou
     save_tickets(keep, path)
     if not keep:
         if sources is None:
-            sources = (EMAIL_PATH, PDF_PATH) if path.resolve() == TICKETS_PATH.resolve() else ()
+            sources = (EMAIL_PATH, PDF_PATH, ADDITIONAL_CONTEXT_PATH) if path.resolve() == TICKETS_PATH.resolve() else ()
         for src in sources:
             if src.is_file():
                 src.replace(solved_dir / src.name)
                 print("{0}\tarchived".format(src.name))
     return moved
+
+
+def save_job(job: dict, jobs_dir: Path = JOBS_DIR) -> dict:
+    jobs_dir.mkdir(parents=True, exist_ok=True)
+    (jobs_dir / "{0}.json".format(_safe_name(job["id"]))).write_text(
+        json.dumps(job, indent=2) + "\n", encoding="utf-8"
+    )
+    return job
+
+
+def load_job(job_id: str, jobs_dir: Path = JOBS_DIR) -> dict | None:
+    path = jobs_dir / "{0}.json".format(_safe_name(job_id))
+    if not path.is_file():
+        return None
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def new_job(kind: str, ticket_id: str | None = None, jobs_dir: Path = JOBS_DIR) -> dict:
+    return save_job(
+        {
+            "id": str(uuid.uuid4()),
+            "kind": kind,
+            "status": "running",
+            "ticket_id": ticket_id,
+            "ticket": None,
+            "tickets": None,
+            "run_id": None,
+            "error": None,
+        },
+        jobs_dir,
+    )
+
+
+def read_run_log(ticket_id: str, run_id: str, runs_dir: Path = RUNS_DIR) -> str | None:
+    path = runs_dir / "{0}-{1}.md".format(_safe_name(ticket_id), _safe_name(run_id))
+    if not path.is_file():
+        return None
+    return path.read_text(encoding="utf-8")
 
 
 def write_run_log(ticket_id: str, kind: str, verdict: str | None, prompt: str, result_text: str | None, run_id: str | None = None, runs_dir: Path = RUNS_DIR) -> Path:
@@ -325,8 +438,9 @@ def run_step(ticket_id: str, want: str, kind: str, make_prompt, next_status: dic
     if ticket["status"] != want:
         print("{0}\tskipped\t{1}".format(ticket_id, ticket["status"]))
         return
-    prompt = make_prompt(ticket, code_context())
-    result = run_cursor(prompt)
+    prompt = make_prompt(ticket, agent_context())
+    from llm import cursor
+    result = cursor.run(prompt)
     if result.result:
         print(result.result)
     verdict = last_verdict(result.result)

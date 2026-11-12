@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import io
 import json
+import threading
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
+import config
 import solver
 import verifier
 from config import (
@@ -24,6 +27,8 @@ from config import (
     last_verdict,
     load_tickets,
     normalize_ticket,
+    agent_context,
+    engineering_standard,
     product_areas,
     save_tickets,
     tech_ticket,
@@ -64,11 +69,18 @@ class NormalizeTests(unittest.TestCase):
         self.assertEqual(ticket["status"], UNRESOLVED)
 
 
+class RequireEnvTests(unittest.TestCase):
+    def test_missing_env_fails(self) -> None:
+        with patch.dict("os.environ", {}, clear=True):
+            with self.assertRaises(RuntimeError):
+                config.require_env("FLEETAI_SUMMARY_MODEL")
+
+
 class ProductAreasTests(unittest.TestCase):
     def test_parser_map_is_repositories_only(self) -> None:
         text = product_areas()
         self.assertIn("## Repositories", text)
-        self.assertNotIn("## Work rules for the solver", text)
+        self.assertNotIn("## Work rules", text)
         self.assertNotIn("staging-uk-jmd-xycare-cicd", text)
 
 
@@ -82,6 +94,46 @@ class TechTicketTests(unittest.TestCase):
         self.assertNotIn("kind_reason", prompt)
         self.assertNotIn("run-1", prompt)
         self.assertIn("Do not invent requirements", prompt)
+        self.assertIn("Follow ENGINEERING STANDARD", prompt)
+        self.assertIn("list each named item", prompt)
+        self.assertIn("not a software defect", prompt)
+        for banned in ("jmd-", "SNOMED", "Xycare", "FHIR", "409137002"):
+            self.assertNotIn(banned, prompt)
+
+
+class EngineeringIngestTests(unittest.TestCase):
+    def test_standard_is_generic_and_loaded_before_the_adapter(self) -> None:
+        skill = engineering_standard()
+        self.assertIn("Edit existing code", skill)
+        self.assertIn("renders stamped fields", skill)
+        self.assertIn("inspect FLEETAI_PRODUCT_ROOT", skill)
+        self.assertIn("already dirty", skill)
+        self.assertIn("done, not done, or deferred", skill)
+        self.assertIn("Do not switch branch, stash, commit, push, rebase, discard, or deploy", skill)
+        for banned in ("jmd-", "SNOMED", "Xycare", "FHIR", "409137002", "staging-uk-jmd"):
+            self.assertNotIn(banned, skill)
+        packed = agent_context()
+        self.assertLess(packed.find("ENGINEERING STANDARD"), packed.find("CODE CONTEXT"))
+        self.assertLess(packed.find("Edit existing code"), packed.find("## Repositories"))
+        sent = solver.ticket_prompt(_ticket("T1", UNRESOLVED), packed)
+        self.assertIn("Edit existing code", sent)
+        self.assertIn("## Repositories", sent)
+
+    def test_missing_or_empty_standard_fails(self) -> None:
+        with TemporaryDirectory() as raw:
+            missing = Path(raw) / "nope.md"
+            empty = Path(raw) / "empty.md"
+            empty.write_text("  \n", encoding="utf-8")
+            prior = config.ENGINEERING_PATH
+            try:
+                config.ENGINEERING_PATH = missing
+                with self.assertRaises(RuntimeError):
+                    engineering_standard()
+                config.ENGINEERING_PATH = empty
+                with self.assertRaises(RuntimeError):
+                    engineering_standard()
+            finally:
+                config.ENGINEERING_PATH = prior
 
 
 class VerifierPromptTests(unittest.TestCase):
@@ -96,6 +148,13 @@ class VerifierPromptTests(unittest.TestCase):
         self.assertIn("Do not mark it resolved while a new bug or that extra complexity is still in the tree", prompt)
         self.assertIn("VERDICT: fixed", prompt)
         self.assertIn("VERDICT: failed", prompt)
+        self.assertIn("Hunt incurred bugs", prompt)
+        self.assertIn("domain rules or identifier tables added in the wrong layer", prompt)
+        self.assertIn("sensitive payloads", prompt)
+        self.assertIn("adjacent behaviour compiled away", prompt)
+        self.assertIn("named ticket items", prompt)
+        for banned in ("jmd-", "SNOMED", "Xycare", "FHIR", "409137002"):
+            self.assertNotIn(banned, prompt)
 
 
 class LastVerdictTests(unittest.TestCase):
@@ -249,6 +308,44 @@ class ArchiveSolvedTests(unittest.TestCase):
             self.assertFalse(report.exists())
             self.assertEqual((solved / "email.desc.txt").read_text(encoding="utf-8"), "previous email\n")
             self.assertEqual((solved / "list.pdf").read_bytes(), b"%PDF")
+
+
+class WorkflowLockTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = TemporaryDirectory()
+        self.prior = config.LOCK_PATH
+        config.LOCK_PATH = Path(self.tmp.name) / ".lock"
+
+    def tearDown(self) -> None:
+        config.LOCK_PATH = self.prior
+        self.tmp.cleanup()
+
+    def test_nested_lock_does_not_block(self) -> None:
+        with config.workflow_lock():
+            with config.workflow_lock():
+                self.assertTrue(config.workflow_busy())
+
+    def test_other_thread_is_busy(self) -> None:
+        held = threading.Event()
+        release = threading.Event()
+
+        def hold() -> None:
+            with config.workflow_lock():
+                held.set()
+                release.wait()
+
+        thread = threading.Thread(target=hold)
+        thread.start()
+        held.wait()
+        try:
+            self.assertTrue(config.workflow_busy())
+            with self.assertRaises(config.WorkflowBusy):
+                with config.workflow_lock(blocking=False):
+                    pass
+        finally:
+            release.set()
+            thread.join()
+        self.assertFalse(config.workflow_busy())
 
 
 class CompleteTests(unittest.TestCase):

@@ -1,12 +1,61 @@
 # fleetai
 
-Reads a bug report and the evaluator email, asks Claude Sonnet on Amazon
-Bedrock for the tickets that are still open, then can hand each unresolved
-ticket to a local Cursor agent.
+Commercial ticket runner. FleetAI is the product. The checkout at
+`FLEETAI_PRODUCT_ROOT` is a customer. `codebase/code-context.md` is that
+customer's adapter: repositories, runtime flow, where domain rules live,
+tests, branches, and data-handling limits. Replace the adapter to point the
+same solver at another platform. `codebase/engineering.md` is the engineering
+standard injected into every solve and verify prompt, ahead of the adapter.
+The prompts themselves stay a short per-turn loop.
+When the adapter does not name a repo, owner, test, or layer, the solver
+inspects the product root before it edits. It does not deploy.
 
-The product code is not in this repo. `codebase/code-context.md` is the map:
-repositories, how they fit together, tests, and branch rules. Set
-`FLEETAI_PRODUCT_ROOT` to the folder that contains those checkouts.
+Parse reads a source email and/or a bug-report PDF, optionally a third
+PDF of extra evidence, and writes `tickets/unsolved_tickets.json`. A long
+extra document is summarized locally before the ticket model sees it. Each
+unresolved ticket can then go to a Cursor agent that edits the product
+checkout.
+
+## Inputs
+
+All three live in `tickets/`. Parse needs the email or the bug report.
+Either one is enough. The extra document is optional, and a missing one is
+normal.
+
+| File | Role |
+|---|---|
+| `email.desc.txt` | Defect facts. When the bug report is also present, process asks in the email are ignored. |
+| `list.pdf` | Bug report. Text is extracted with PyMuPDF. A page that is only an image contributes no text. |
+| `additional_context.pdf` | Optional evidence. It may fill `context` and `expected` for a defect the email or the bug report already names. It may also show that a listed item is not a software defect, in which case that item is omitted. It cannot create a ticket by itself. |
+
+`tickets/resolved/<build>/` is a place to park a previous email, PDF, and
+parsed list by hand before replacing the working files. The runner does not
+read that folder.
+
+## Models
+
+Clients are in `llm.py`. Parse uses the first two. Solve and verify use the
+third. Model names are read after `.env` is loaded. A variable already set
+in the environment is left as it is.
+
+| Client | Model env | Call | When |
+|---|---|---|---|
+| `ollama` | `FLEETAI_SUMMARY_MODEL` | `POST {OLLAMA_HOST}/api/chat`, temperature 0 | Additional-context text longer than `FLEETAI_SUMMARY_LIMIT` |
+| `bedrock` | `BEDROCK_MODEL_ID` | Bedrock Runtime `converse` or bearer `BEDROCK_API_KEY` / `AWS_BEARER_TOKEN_BEDROCK` | Every parse |
+| `cursor` | `FLEETAI_CURSOR_MODEL` | Cursor SDK `Agent.prompt` in the product checkout | Solve and verify |
+
+Ollama is skipped when there is no additional context, or when the extracted
+text is already `FLEETAI_SUMMARY_LIMIT` characters or shorter. That text is sent unchanged.
+The local request uses `FLEETAI_OLLAMA_CONTEXT_WINDOW` and starts the reply in the
+final channel. When a summary is needed, the local model keeps defect ids, case ids,
+session ids, codes, what was shown, what was stored, and the required
+outcome. It drops the review method, questions, passed checks, and plans
+for a later round. An empty reply is an error. Ollama must be running for that path at `OLLAMA_HOST`.
+
+Bedrock receives the email, the bug report, the additional context or its
+summary, the Repositories section of the code map, and the ids already in
+`tickets/solved/`. It returns a JSON array. The parser sets workflow status
+itself. The model does not.
 
 ## Commands
 
@@ -16,55 +65,96 @@ cd /Users/minh/repos/netpalm.ai/fleetai
 
 python main.py parse              # email and/or PDF -> tickets/unsolved_tickets.json
 python main.py                    # list tickets and their state
-python main.py run                # parse, solve, verify, archive solved
+python main.py execute           # parse, solve, verify, archive solved
 python orchestrator.py            # same pipeline
 python main.py JMD-30SEP-05       # solve one unresolved ticket
 python main.py verify             # verify every verifying ticket
 python main.py verify JMD-30SEP-05
 python main.py complete JMD-30SEP-05
+uvicorn api:app
 ```
 
-The parser writes new tickets as `unresolved` and does not rewrite tickets
-that are already `verifying`. After the pipeline, `fixed` and `completed`
-tickets move to `tickets/solved/<id>.json`. A later parse compares each
-incoming ticket to that archive: restating it on a retest list is skipped.
-The parser decides in ordinary language whether a completed test of that id
-did not match expected behaviour. If so it sets kind `recurrent` and new
-context; then the ticket comes back as `unresolved`. There is no keyword list. If the working list is empty, the previous `email.desc.txt`
-and `list.pdf` move there too.
+The API is the same workflow as the CLI. `GET /health` returns the runner version when `engineering.md` and `code-context.md` are present. `POST /tickets/{id}/solve`, `POST /tickets/{id}/verify`, and `POST /execute` return `202` and a job id. Poll `GET /jobs/{id}` until `done` or `error`. `GET /tickets/{id}` reads the working list, then the solved archive. `GET /tickets/{id}/runs/{run_id}` reads the solve or verify log. `POST /tickets/{id}/complete` stays synchronous and returns the archived ticket. Parse, solve, verify, complete, and execute take one exclusive lock so two writers cannot share `unsolved_tickets.json`. A second writer gets `409 workflow busy`.
 
-- `unresolved` — parser default; solver may run it; verifier fail returns here
-- `verifying` — solver returned `VERDICT: ready`
-- `fixed` — verifier reviewed the change, repaired introduced bugs, stripped unnecessary complexity, and returned `VERDICT: fixed`; then archived
-- `completed` — `python main.py complete <id>` after live QA; then archived
+`python main.py parse` does not solve or verify. It needs AWS credentials
+and a region. It needs Ollama only when the additional context is longer
+than the cap.
 
-Parser extracts the software defect only. Solver and verifier see
-`id`, `title`, `severity`, `services`, `context`, and `expected`. Business
-labels and process asks are not production work. Workflow is only
-`unresolved`, `verifying`, `fixed`.
-`repos` is leftover metadata. Routing is `code-context.md` plus `services`.
+## Workflow
+
+States are `unresolved`, `verifying`, `completed`, and `fixed`. The parser
+writes new tickets as `unresolved`. A new parse drops a previous
+`unresolved` ticket that it does not return. It keeps a ticket that is
+`verifying`, `completed`, or `fixed`.
+
+An id already in `tickets/solved/` is skipped unless the model marks it
+`recurrent` and `context` or `expected` differs from the archive. There is
+no keyword list. A restated id, a retest request, or a test that has not
+happened yet is omitted.
+
+- `unresolved` — parser default. The solver may run it. A verifier fail returns here.
+- `verifying` — solver returned `VERDICT: ready`.
+- `fixed` — verifier reviewed the change, repaired bugs that change introduced, stripped unnecessary complexity, and returned `VERDICT: fixed`. Then archived.
+- `completed` — `python main.py complete <id>` after live QA, and only from `verifying`. Then archived. This is not `fixed`.
+
+`archive_solved` moves `fixed` and `completed` tickets to
+`tickets/solved/<id>.json`. When the working list is then empty, it also
+moves `email.desc.txt`, `list.pdf`, and `additional_context.pdf` into
+`tickets/solved/`, replacing the copies parked there.
+
+The parser keeps the software defect only. Solver and verifier see `id`,
+`title`, `severity`, `services`, `context`, and `expected`. Business labels
+and process asks are not engineering work. `repos` is leftover metadata.
+Routing is `code-context.md` plus `services`.
 
 ## Files
 
-- `config.py` — ticket paths and workflow. Reads the code context file.
-- `parser.py` — `get_tickets()` from `tickets/email.desc.txt` and/or `tickets/list.pdf` (need at least one); PRODUCT AREAS is the Repositories section of the code map
-- `solver.py` — `solve()` / `solve_tickets()`; `VERDICT: ready` → `verifying`
-- `verifier.py` — `verify()` / `verify_tickets()`; review and repair introduced bugs; `VERDICT: fixed` → `fixed`, fail → `unresolved`
-- `orchestrator.py` — `run()`: get tickets, solve, verify, archive solved
-- `main.py` — CLI for one step, or `run` for the pipeline
-- `codebase/code-context.md` — product map supplied for the current codebase
-- `tickets/unsolved_tickets.json` — open ticket list with `status`
-- `tickets/solved/<id>.json` — archived `fixed` / `completed` tickets
+- `llm.py` — `ollama`, `bedrock`, and `cursor`
+- `config.py` — paths, ticket states, merge with the solved archive, archive
+- `parser.py` — read the inputs, summarize when needed, ask Bedrock, write the working list
+- `solver.py` — `solve()` / `solve_tickets()`; `VERDICT: ready` sets `verifying`. `complete()` is live QA
+- `verifier.py` — `verify()` / `verify_tickets()`; `VERDICT: fixed` sets `fixed`, `VERDICT: failed` sets `unresolved`
+- `orchestrator.py` — `execute()`: parse, solve, verify, archive
+- `main.py` — CLI
+- `api.py` — FastAPI: `GET /health`, `GET /tickets`, `GET /tickets/{id}`, `GET /tickets/{id}/runs/{run_id}`, `GET /jobs/{id}`, `POST /tickets/parse`, `POST /tickets/{id}/solve`, `POST /tickets/{id}/verify`, `POST /tickets/{id}/complete`, `POST /execute`
+- `pyproject.toml` — package name, version, pinned dependencies
+- `Dockerfile` / `docker-compose.yml` — one-worker API image; tickets and `FLEETAI_PRODUCT_ROOT` are volumes
+- `codebase/code-context.md` — product map. Not the additional-context PDF
+- `tickets/unsolved_tickets.json` — working list. Missing means there are no open tickets
+- `tickets/solved/<id>.json` — archived `fixed` and `completed` tickets
 - `tickets/runs/<ticket-id>-<run-id>.md` — solve/verify log (gitignored)
-- `tests/test_workflow.py` — workflow unit tests
+- `tests/test_workflow.py` — workflow unit tests. They do not call the models
+
+The working email, both working PDFs, and the same names under
+`tickets/solved/` and `tickets/resolved/` are gitignored. A parked
+`unsolved_tickets.json` under `tickets/resolved/` is not.
 
 ## Environment
 
-- `AWS_REGION` / `AWS_DEFAULT_REGION` and AWS credentials for the parser
-- `BEDROCK_MODEL_ID` optional, defaults to Claude Sonnet 4.6
-- `CURSOR_API_KEY` for the solver. Stored as a GitHub Actions secret on
-  `ngtminh/fleetai`. GitHub will not return secret values to a local script.
-  Local runs read the gitignored `.env`. Actions can inject
+Parse:
+
+- `AWS_REGION`
+- `AWS_BEARER_TOKEN_BEDROCK` — GitHub Actions secret. Not stored in `.env`. If unset locally, boto3 uses the default AWS credential chain.
+- `BEDROCK_MODEL_ID`, `FLEETAI_BEDROCK_MAX_TOKENS`, `FLEETAI_BEDROCK_TIMEOUT`, `FLEETAI_BEDROCK_CONNECT_TIMEOUT`
+- `FLEETAI_SUMMARY_MODEL`, `OLLAMA_HOST`, `FLEETAI_SUMMARY_LIMIT`, `FLEETAI_OLLAMA_TIMEOUT`, `FLEETAI_OLLAMA_MAX_TOKENS`, `FLEETAI_OLLAMA_CONTEXT_WINDOW`
+
+Solve and verify:
+
+- `CURSOR_API_KEY` — GitHub Actions secret. Not stored in `.env`. GitHub will
+  not return that value to a local script. Actions inject
   `${{ secrets.CURSOR_API_KEY }}`.
-- `FLEETAI_PRODUCT_ROOT` required for solve and verify
-- `FLEETAI_CURSOR_MODEL` optional, defaults to `grok-4.6` with high + fast
+- `FLEETAI_PRODUCT_ROOT`, the directory that contains the product checkouts
+- `FLEETAI_CURSOR_MODEL`, `FLEETAI_CURSOR_REASONING`, `FLEETAI_CURSOR_FAST`
+
+`.env` is empty. Non-secret config is GitHub Actions variables on `ngtminh/fleetai`. Secrets are Actions secrets only:
+
+- `CURSOR_API_KEY`
+- `AWS_BEARER_TOKEN_BEDROCK`
+
+CI reads `${{ vars.* }}` and `${{ secrets.* }}`. The ubuntu test job uses `FLEETAI_PRODUCT_ROOT=/tmp/product`. A push to `main` then deploys on the self-hosted macOS runner: `docker compose down`, `up --build`, prune stopped containers and dangling images (not volumes), then `GET /health` on `127.0.0.1:8000`.
+
+## Docker
+
+The image is the runner, not the customer. Tickets persist at `FLEETAI_TICKETS_DIR`. Product checkouts bind from `FLEETAI_PRODUCT_ROOT`. One uvicorn worker. Compose publishes `127.0.0.1:8000` only (no auth).
+
+Ollama on the Docker host is `http://host.docker.internal:11434`. A Mac `node_modules` or venv inside the Linux image will not run.

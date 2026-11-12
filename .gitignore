@@ -4,6 +4,12 @@ __pycache__/
 .env
 tickets/list.pdf
 tickets/email.desc.txt
+tickets/additional_context.pdf
 tickets/solved/list.pdf
 tickets/solved/email.desc.txt
+tickets/solved/additional_context.pdf
+tickets/resolved/**/list.pdf
+tickets/resolved/**/email.desc.txt
 tickets/runs/
+tickets/jobs/
+tickets/.lock

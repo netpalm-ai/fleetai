@@ -9,7 +9,7 @@ import parser
 import solver
 import verifier
 
-USAGE = "usage: python main.py [parse|list|run|solve|solve <id>|verify|verify <id>|complete <id>|<id>]"
+USAGE = "usage: python main.py [parse|list|execute|solve|solve <id>|verify|verify <id>|complete <id>|<id>]"
 
 
 def main() -> None:
@@ -20,8 +20,8 @@ def main() -> None:
         parser.print_tickets(parser.get_tickets())
     elif args == ["solve"]:
         solver.solve_tickets()
-    elif args == ["run"]:
-        orchestrator.run()
+    elif args == ["execute"]:
+        orchestrator.execute()
     elif args == ["verify"]:
         verifier.verify_tickets()
     elif len(args) == 2 and args[0] == "solve":

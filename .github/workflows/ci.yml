@@ -1,0 +1,72 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION }}
+  AWS_BEARER_TOKEN_BEDROCK: ${{ secrets.AWS_BEARER_TOKEN_BEDROCK }}
+  BEDROCK_MODEL_ID: ${{ vars.BEDROCK_MODEL_ID }}
+  CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
+  FLEETAI_BEDROCK_CONNECT_TIMEOUT: ${{ vars.FLEETAI_BEDROCK_CONNECT_TIMEOUT }}
+  FLEETAI_BEDROCK_MAX_TOKENS: ${{ vars.FLEETAI_BEDROCK_MAX_TOKENS }}
+  FLEETAI_BEDROCK_TIMEOUT: ${{ vars.FLEETAI_BEDROCK_TIMEOUT }}
+  FLEETAI_CURSOR_FAST: ${{ vars.FLEETAI_CURSOR_FAST }}
+  FLEETAI_CURSOR_MODEL: ${{ vars.FLEETAI_CURSOR_MODEL }}
+  FLEETAI_CURSOR_REASONING: ${{ vars.FLEETAI_CURSOR_REASONING }}
+  FLEETAI_OLLAMA_CONTEXT_WINDOW: ${{ vars.FLEETAI_OLLAMA_CONTEXT_WINDOW }}
+  FLEETAI_OLLAMA_MAX_TOKENS: ${{ vars.FLEETAI_OLLAMA_MAX_TOKENS }}
+  FLEETAI_OLLAMA_TIMEOUT: ${{ vars.FLEETAI_OLLAMA_TIMEOUT }}
+  FLEETAI_SUMMARY_LIMIT: ${{ vars.FLEETAI_SUMMARY_LIMIT }}
+  FLEETAI_SUMMARY_MODEL: ${{ vars.FLEETAI_SUMMARY_MODEL }}
+  OLLAMA_HOST: ${{ vars.OLLAMA_HOST }}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      FLEETAI_PRODUCT_ROOT: /tmp/product
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install
+        run: python -c "import pathlib, subprocess, tomllib; subprocess.check_call(['pip', 'install', '--quiet', *tomllib.loads(pathlib.Path('pyproject.toml').read_text())['project']['dependencies']])"
+      - name: Test
+        run: python -m pytest tests/ -q
+      - name: Bedrock hello
+        run: |
+          mkdir -p /tmp/product
+          python -c "from llm import bedrock; print(bedrock.complete('Say hello in one word.'))"
+
+  deploy:
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, macOS]
+    env:
+      FLEETAI_PRODUCT_ROOT: ${{ vars.FLEETAI_PRODUCT_ROOT }}
+      FLEETAI_TICKETS_DIR: ${{ vars.FLEETAI_TICKETS_DIR }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy
+        run: |
+          docker compose down --remove-orphans
+          docker compose up -d --build --remove-orphans
+          docker container prune -f
+          docker image prune -f
+          docker builder prune -f
+      - name: Health
+        run: |
+          for i in 1 2 3 4 5 6 7 8 9 10; do
+            if curl -fsS http://127.0.0.1:8000/health; then
+              exit 0
+            fi
+            sleep 2
+          done
+          exit 1

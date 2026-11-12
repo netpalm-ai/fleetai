@@ -6,7 +6,8 @@ import solver
 import verifier
 
 
-def run() -> None:
+@config.locked
+def execute() -> None:
     parser.get_tickets()
     solver.solve_tickets()
     verifier.verify_tickets()
@@ -14,4 +15,4 @@ def run() -> None:
 
 
 if __name__ == "__main__":
-    run()
+    execute()
