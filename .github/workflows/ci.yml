@@ -81,7 +81,7 @@ jobs:
       - name: Build
         run: npm run build
 
-  deploy:
+  deploy-m4:
     needs: [test, test-frontend]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: [self-hosted, macOS]
@@ -116,7 +116,7 @@ jobs:
           check http://127.0.0.1:8000/health
           check http://127.0.0.1:8080/
 
-  deploy-i9:
+  deploy:
     needs: [test, test-frontend]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: [self-hosted, Linux, i9]
