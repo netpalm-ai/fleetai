@@ -7,11 +7,18 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
+from uuid import uuid4
 
 from fastapi.testclient import TestClient
 
 import api
 import config
+from auth.deps import get_current_user
+from auth.service import User
+
+
+def _user() -> User:
+    return User(id=uuid4(), username="tester")
 
 
 class ApiTests(unittest.TestCase):
@@ -22,9 +29,11 @@ class ApiTests(unittest.TestCase):
         self.prior_lock = config.LOCK_PATH
         config.JOBS_DIR = self.jobs
         config.LOCK_PATH = self.jobs / ".lock"
+        api.app.dependency_overrides[get_current_user] = _user
         self.client = TestClient(api.app)
 
     def tearDown(self) -> None:
+        api.app.dependency_overrides.clear()
         config.JOBS_DIR = self.prior
         config.LOCK_PATH = self.prior_lock
         self.tmp.cleanup()
@@ -143,3 +152,19 @@ class ApiTests(unittest.TestCase):
             response = self.client.get("/tickets/T1/runs/run-1")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {"ticket_id": "T1", "run_id": "run-1", "text": "# T1 solve\n"})
+
+    def test_ticket_routes_require_login(self) -> None:
+        api.app.dependency_overrides.clear()
+        try:
+            self.assertEqual(self.client.get("/tickets").status_code, 401)
+            self.assertEqual(self.client.get("/tickets/T1").status_code, 401)
+            self.assertEqual(self.client.get("/tickets/T1/runs/run-1").status_code, 401)
+            self.assertEqual(self.client.get("/jobs/missing").status_code, 401)
+            self.assertEqual(self.client.post("/tickets/parse").status_code, 401)
+            self.assertEqual(self.client.post("/tickets/T1/solve").status_code, 401)
+            self.assertEqual(self.client.post("/tickets/T1/verify").status_code, 401)
+            self.assertEqual(self.client.post("/tickets/T1/complete").status_code, 401)
+            self.assertEqual(self.client.post("/execute").status_code, 401)
+            self.assertEqual(self.client.get("/health").status_code, 200)
+        finally:
+            api.app.dependency_overrides[get_current_user] = _user

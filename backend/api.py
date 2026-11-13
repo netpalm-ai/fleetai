@@ -10,9 +10,11 @@ import orchestrator
 import parser
 import solver
 import verifier
+from auth.deps import get_current_user
 from auth.routes import router as auth_router
+from auth.service import User
 from auth.sessions import start_cleanup
-from fastapi import BackgroundTasks, FastAPI, HTTPException
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
 
 _cleanup_stop = None
 
@@ -95,12 +97,12 @@ def health() -> dict:
 
 
 @app.get("/tickets")
-def get_tickets() -> list[dict]:
+def get_tickets(_user: User = Depends(get_current_user)) -> list[dict]:
     return config.load_tickets()
 
 
 @app.get("/tickets/{ticket_id}")
-def get_ticket(ticket_id: str) -> dict:
+def get_ticket(ticket_id: str, _user: User = Depends(get_current_user)) -> dict:
     ticket = config.find_ticket(ticket_id)
     if ticket is None:
         raise HTTPException(404, "ticket not found: {0}".format(ticket_id))
@@ -108,7 +110,7 @@ def get_ticket(ticket_id: str) -> dict:
 
 
 @app.get("/tickets/{ticket_id}/runs/{run_id}")
-def get_run_log(ticket_id: str, run_id: str) -> dict:
+def get_run_log(ticket_id: str, run_id: str, _user: User = Depends(get_current_user)) -> dict:
     text = config.read_run_log(ticket_id, run_id)
     if text is None:
         raise HTTPException(404, "run not found: {0} {1}".format(ticket_id, run_id))
@@ -116,7 +118,7 @@ def get_run_log(ticket_id: str, run_id: str) -> dict:
 
 
 @app.get("/jobs/{job_id}")
-def get_job(job_id: str) -> dict:
+def get_job(job_id: str, _user: User = Depends(get_current_user)) -> dict:
     job = config.load_job(job_id)
     if job is None:
         raise HTTPException(404, "job not found: {0}".format(job_id))
@@ -124,7 +126,7 @@ def get_job(job_id: str) -> dict:
 
 
 @app.post("/tickets/parse")
-def parse_tickets() -> list[dict]:
+def parse_tickets(_user: User = Depends(get_current_user)) -> list[dict]:
     try:
         with config.workflow_lock(blocking=False):
             return _call(parser.get_tickets)
@@ -133,19 +135,19 @@ def parse_tickets() -> list[dict]:
 
 
 @app.post("/tickets/{ticket_id}/solve", status_code=202)
-def solve_ticket(ticket_id: str, background: BackgroundTasks) -> dict:
+def solve_ticket(ticket_id: str, background: BackgroundTasks, _user: User = Depends(get_current_user)) -> dict:
     _call(config.require_ticket, ticket_id)
     return _start_job("solve", solver.solve, background, ticket_id)
 
 
 @app.post("/tickets/{ticket_id}/verify", status_code=202)
-def verify_ticket(ticket_id: str, background: BackgroundTasks) -> dict:
+def verify_ticket(ticket_id: str, background: BackgroundTasks, _user: User = Depends(get_current_user)) -> dict:
     _call(config.require_ticket, ticket_id)
     return _start_job("verify", verifier.verify, background, ticket_id)
 
 
 @app.post("/tickets/{ticket_id}/complete")
-def complete_ticket(ticket_id: str) -> dict:
+def complete_ticket(ticket_id: str, _user: User = Depends(get_current_user)) -> dict:
     try:
         with config.workflow_lock(blocking=False):
             _call(solver.complete, ticket_id)
@@ -158,5 +160,5 @@ def complete_ticket(ticket_id: str) -> dict:
 
 
 @app.post("/execute", status_code=202)
-def execute(background: BackgroundTasks) -> dict:
+def execute(background: BackgroundTasks, _user: User = Depends(get_current_user)) -> dict:
     return _start_job("execute", orchestrator.execute, background)
