@@ -61,7 +61,7 @@ itself. The model does not.
 
 ```bash
 conda activate dev
-cd /Users/minh/repos/netpalm.ai/fleetai
+cd /Users/minh/repos/netpalm.ai/fleetai/backend
 
 python main.py parse              # email and/or PDF -> tickets/unsolved_tickets.json
 python main.py                    # list tickets and their state
@@ -116,9 +116,11 @@ Routing is `code-context.md` plus `services`.
 - `verifier.py` — `verify()` / `verify_tickets()`; `VERDICT: fixed` sets `fixed`, `VERDICT: failed` sets `unresolved`
 - `orchestrator.py` — `execute()`: parse, solve, verify, archive
 - `main.py` — CLI
-- `api.py` — FastAPI: `GET /health`, `GET /tickets`, `GET /tickets/{id}`, `GET /tickets/{id}/runs/{run_id}`, `GET /jobs/{id}`, `POST /tickets/parse`, `POST /tickets/{id}/solve`, `POST /tickets/{id}/verify`, `POST /tickets/{id}/complete`, `POST /execute`
+- `api.py` — FastAPI: `GET /health`, `GET /tickets`, `GET /tickets/{id}`, `GET /tickets/{id}/runs/{run_id}`, `GET /jobs/{id}`, `POST /tickets/parse`, `POST /tickets/{id}/solve`, `POST /tickets/{id}/verify`, `POST /tickets/{id}/complete`, `POST /execute`, plus `/auth/register`, `/auth/login`, `/auth/logout`, `/auth/me`
+- `db.py` — psycopg pool, `backend/migrations/` at startup
+- `auth/` — Argon2id passwords, opaque session cookie `fleetai_session`
 - `pyproject.toml` — package name, version, pinned dependencies
-- `Dockerfile` / `docker-compose.yml` — one-worker API image; tickets and `FLEETAI_PRODUCT_ROOT` are volumes
+- `backend/` — API microservice. `frontend/` — web app microservice. Compose runs both.
 - `codebase/code-context.md` — product map. Not the additional-context PDF
 - `tickets/unsolved_tickets.json` — working list. Missing means there are no open tickets
 - `tickets/solved/<id>.json` — archived `fixed` and `completed` tickets
@@ -150,11 +152,12 @@ Solve and verify:
 
 - `CURSOR_API_KEY`
 - `AWS_BEARER_TOKEN_BEDROCK`
+- `POSTGRES_PASSWORD`
 
-CI reads `${{ vars.* }}` and `${{ secrets.* }}`. The ubuntu test job uses `FLEETAI_PRODUCT_ROOT=/tmp/product`. A push to `main` then deploys on the self-hosted macOS runner: `docker compose down`, `up --build`, prune stopped containers and dangling images (not volumes), then `GET /health` on `127.0.0.1:8000`.
+CI reads `${{ vars.* }}` and `${{ secrets.* }}`. Ubuntu runs backend pytest and a frontend production build. A push to `main` then deploys both services on the self-hosted macOS runner: `docker compose down`, `up --build`, prune stopped containers and dangling images (not volumes), then `GET /health` on `127.0.0.1:8000` and `GET /` on `127.0.0.1:8080`.
 
 ## Docker
 
-The image is the runner, not the customer. Tickets persist at `FLEETAI_TICKETS_DIR`. Product checkouts bind from `FLEETAI_PRODUCT_ROOT`. One uvicorn worker. Compose publishes `127.0.0.1:8000` only (no auth).
+`backend` is the runner API, not the customer. Tickets persist at `FLEETAI_TICKETS_DIR`. Product checkouts bind from `FLEETAI_PRODUCT_ROOT`. One uvicorn worker. `postgres` is `postgres:16-alpine` with named volume `pgdata`, published at `127.0.0.1:5432`. `frontend` is the web app; nginx proxies `/api/v1/` to `backend:8000` and rate-limits `/api/v1/auth/login`. Compose publishes `127.0.0.1:8000` (API) and `127.0.0.1:8080` (UI). Auth is an HttpOnly cookie session. Ticket JSON workflow is unchanged.
 
 Ollama on the Docker host is `http://host.docker.internal:11434`. A Mac `node_modules` or venv inside the Linux image will not run.

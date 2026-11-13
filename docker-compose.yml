@@ -1,11 +1,36 @@
+name: fleetai
+
 services:
-  fleetai:
-    build: .
-    image: fleetai:0.1.0
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: fleetai
+      POSTGRES_DB: fleetai
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fleetai -d fleetai"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+    image: fleetai-backend:0.1.0
     ports:
       - "127.0.0.1:8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
     environment:
       FLEETAI_PRODUCT_ROOT: /product
+      DATABASE_URL: postgresql://fleetai:${POSTGRES_PASSWORD}@postgres:5432/fleetai
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
       AWS_REGION: ${AWS_REGION}
       AWS_BEARER_TOKEN_BEDROCK: ${AWS_BEARER_TOKEN_BEDROCK:-}
       BEDROCK_MODEL_ID: ${BEDROCK_MODEL_ID}
@@ -21,10 +46,24 @@ services:
       FLEETAI_OLLAMA_TIMEOUT: ${FLEETAI_OLLAMA_TIMEOUT}
       FLEETAI_SUMMARY_LIMIT: ${FLEETAI_SUMMARY_LIMIT}
       FLEETAI_SUMMARY_MODEL: ${FLEETAI_SUMMARY_MODEL}
-      OLLAMA_HOST: ${OLLAMA_HOST}
+      OLLAMA_HOST: http://host.docker.internal:11434
     volumes:
-      - ${FLEETAI_TICKETS_DIR:-./tickets}:/app/tickets
+      - ${FLEETAI_TICKETS_DIR:-./backend/tickets}:/app/tickets
       - ${FLEETAI_PRODUCT_ROOT:?set FLEETAI_PRODUCT_ROOT}:/product
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+    image: fleetai-frontend:0.1.0
+    ports:
+      - "127.0.0.1:8080:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  pgdata:

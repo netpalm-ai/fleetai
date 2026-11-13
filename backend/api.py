@@ -2,14 +2,36 @@
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
+
 import config
+import db
 import orchestrator
 import parser
 import solver
 import verifier
+from auth.routes import router as auth_router
+from auth.sessions import start_cleanup
 from fastapi import BackgroundTasks, FastAPI, HTTPException
 
-app = FastAPI(title="fleetai", version=config.VERSION)
+_cleanup_stop = None
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    global _cleanup_stop
+    db.open_pool()
+    if db.pool is not None:
+        _cleanup_stop = start_cleanup()
+    yield
+    if _cleanup_stop is not None:
+        _cleanup_stop.set()
+        _cleanup_stop = None
+    db.close_pool()
+
+
+app = FastAPI(title="fleetai", version=config.VERSION, lifespan=lifespan)
+app.include_router(auth_router, prefix="/auth")
 
 
 def _call(fn, *args):

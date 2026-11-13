@@ -2,7 +2,7 @@ name: ci
 
 on:
   push:
-    branches: [main, prod/i9]
+    branches: [main]
   pull_request:
 
 permissions:
@@ -29,8 +29,27 @@ env:
 jobs:
   test:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: fleetai
+          POSTGRES_DB: fleetai
+          POSTGRES_PASSWORD: test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U fleetai -d fleetai"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
     env:
       FLEETAI_PRODUCT_ROOT: /tmp/product
+      DATABASE_URL: postgresql://fleetai:test@127.0.0.1:5432/fleetai
+      COOKIE_SECURE: "false"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -45,13 +64,32 @@ jobs:
           mkdir -p /tmp/product
           python -c "from llm import bedrock; print(bedrock.complete('Say hello in one word.'))"
 
+  test-frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install
+        run: npm ci
+      - name: Build
+        run: npm run build
+
   deploy:
-    needs: test
+    needs: [test, test-frontend]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: [self-hosted, macOS]
     env:
       FLEETAI_PRODUCT_ROOT: ${{ vars.FLEETAI_PRODUCT_ROOT }}
       FLEETAI_TICKETS_DIR: ${{ vars.FLEETAI_TICKETS_DIR }}
+      POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+      COOKIE_SECURE: "false"
     steps:
       - uses: actions/checkout@v4
       - name: Deploy
@@ -63,26 +101,45 @@ jobs:
           docker builder prune -f
       - name: Health
         run: |
-          for i in 1 2 3 4 5 6 7 8 9 10; do
-            if curl -fsS http://127.0.0.1:8000/health; then
-              exit 0
-            fi
-            sleep 2
-          done
-          exit 1
+          check() {
+            local url=$1
+            for i in 1 2 3 4 5 6 7 8 9 10; do
+              if curl -fsS "$url"; then
+                echo
+                return 0
+              fi
+              sleep 2
+            done
+            echo "unhealthy $url" >&2
+            return 1
+          }
+          check http://127.0.0.1:8000/health
+          check http://127.0.0.1:8080/
 
   deploy-i9:
-    needs: test
-    if: github.event_name == 'push' && github.ref == 'refs/heads/prod/i9'
+    needs: [test, test-frontend]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: [self-hosted, Linux, i9]
     env:
       FLEETAI_PRODUCT_ROOT: /home/minh/repos/hba
-      FLEETAI_TICKETS_DIR: /home/deploy/fleetai/tickets
+      FLEETAI_TICKETS_DIR: /home/deploy/fleetai/backend/tickets
       OLLAMA_HOST: http://host.docker.internal:11434
+      COOKIE_SECURE: "true"
     steps:
       - uses: actions/checkout@v4
       - name: Deploy
         run: |
+          mkdir -p /home/deploy/fleetai
+          rsync -a --delete \
+            --exclude .git/ \
+            --exclude .env \
+            --exclude frontend/node_modules/ \
+            --exclude frontend/dist/ \
+            --exclude backend/tickets/runs/ \
+            --exclude backend/tickets/jobs/ \
+            --exclude backend/tickets/.lock \
+            ./ /home/deploy/fleetai/
+          cd /home/deploy/fleetai
           docker compose down --remove-orphans
           docker compose up -d --build --remove-orphans
           docker container prune -f
@@ -90,10 +147,17 @@ jobs:
           docker builder prune -f
       - name: Health
         run: |
-          for i in 1 2 3 4 5 6 7 8 9 10; do
-            if curl -fsS http://127.0.0.1:8000/health; then
-              exit 0
-            fi
-            sleep 2
-          done
-          exit 1
+          check() {
+            local url=$1
+            for i in 1 2 3 4 5 6 7 8 9 10; do
+              if curl -fsS "$url"; then
+                echo
+                return 0
+              fi
+              sleep 2
+            done
+            echo "unhealthy $url" >&2
+            return 1
+          }
+          check http://127.0.0.1:8000/health
+          check http://127.0.0.1:8080/
