@@ -22,7 +22,7 @@ def get_current_user(request: Request) -> User:
         with db.get_pool().connection() as conn:
             row = conn.execute(
                 """
-                SELECT u.id, u.username, s.id AS session_id
+                SELECT u.id, u.username, u.first_name, u.last_name, s.id AS session_id
                 FROM sessions s
                 JOIN users u ON u.id = s.user_id
                 WHERE s.token_hash = %s
@@ -30,6 +30,7 @@ def get_current_user(request: Request) -> User:
                   AND s.expires_at > now()
                   AND s.last_seen_at > now() - (%s * interval '1 day')
                   AND u.status = 'active'
+                  AND u.email_verified
                 """,
                 (token_hash(token), session_idle_days()),
             ).fetchone()
@@ -38,4 +39,9 @@ def get_current_user(request: Request) -> User:
     if row is None:
         raise HTTPException(401, "unauthorized")
     touch_session(row["session_id"])
-    return User(id=row["id"], username=str(row["username"]))
+    return User(
+        id=row["id"],
+        username=str(row["username"]),
+        first_name=str(row["first_name"] or ""),
+        last_name=str(row["last_name"] or ""),
+    )

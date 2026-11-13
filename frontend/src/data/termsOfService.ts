@@ -24,7 +24,7 @@ export const TERMS_SECTIONS: TermsSection[] = [
   {
     heading: "3. Accounts",
     body: [
-      "You must provide an accurate username and keep credentials confidential. You are responsible for activity under your account.",
+      "You must provide an accurate email and keep credentials confidential. You are responsible for activity under your account.",
       "We may suspend or close an account that is shared in an unsafe way, that attempts to bypass access controls, or that we reasonably believe is being used to harm the Service or another customer.",
     ],
   },

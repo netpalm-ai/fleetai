@@ -18,7 +18,7 @@ from auth.service import User
 
 
 def _user() -> User:
-    return User(id=uuid4(), username="tester")
+    return User(id=uuid4(), username="tester", first_name="Test", last_name="User")
 
 
 class ApiTests(unittest.TestCase):

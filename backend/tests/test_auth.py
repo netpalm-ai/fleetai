@@ -7,11 +7,32 @@ import unittest
 
 from fastapi.testclient import TestClient
 
+from uuid import UUID
+
 import api
 import db
+from auth.service import issue_verify_token
 from auth.sessions import COOKIE_NAME
 
 CSRF = {"X-Requested-With": "fleetai"}
+ADA = "ada@example.com"
+BOB = "bob@example.com"
+CASEY = "Casey@example.com"
+EVE = "eve@example.com"
+ZED = "zed@example.com"
+PASSWORD = "correct-horse"
+
+
+def _reg(email: str, **extra) -> dict:
+    body = {
+        "username": email,
+        "first_name": "Ada",
+        "last_name": "Lovelace",
+        "password": PASSWORD,
+        "tos_accepted": True,
+    }
+    body.update(extra)
+    return body
 
 
 @unittest.skipUnless(os.getenv("DATABASE_URL"), "DATABASE_URL is required")
@@ -26,74 +47,124 @@ class AuthTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.cm.__exit__(None, None, None)
 
+    def _verify(self, user_id: str) -> None:
+        token = issue_verify_token(UUID(user_id))
+        verified = self.client.post("/auth/verify", json={"token": token}, headers=CSRF)
+        self.assertEqual(verified.status_code, 200)
+
     def test_register_login_me_logout(self) -> None:
         created = self.client.post(
             "/auth/register",
-            json={"username": "Ada", "password": "correct-horse", "tos_accepted": True},
+            json=_reg(ADA),
             headers=CSRF,
         )
         self.assertEqual(created.status_code, 201)
-        self.assertEqual(created.json()["username"], "Ada")
-        self.assertIn(COOKIE_NAME, created.cookies)
+        self.assertEqual(created.json()["username"], ADA)
+        self.assertNotIn(COOKIE_NAME, created.cookies)
+        blocked = self.client.post(
+            "/auth/login",
+            json={"username": ADA, "password": PASSWORD},
+            headers=CSRF,
+        )
+        self.assertEqual(blocked.status_code, 403)
+        self._verify(created.json()["id"])
+        logged = self.client.post(
+            "/auth/login",
+            json={"username": ADA, "password": PASSWORD},
+            headers=CSRF,
+        )
+        self.assertEqual(logged.status_code, 200)
         me = self.client.get("/auth/me")
         self.assertEqual(me.status_code, 200)
-        self.assertEqual(me.json()["username"], "Ada")
+        self.assertEqual(me.json()["username"], ADA)
+        self.assertEqual(me.json()["first_name"], "Ada")
+        self.assertEqual(me.json()["last_name"], "Lovelace")
         with db.get_pool().connection() as conn:
-            row = conn.execute("SELECT password_hash FROM users WHERE username = %s", ("Ada",)).fetchone()
+            row = conn.execute(
+                "SELECT password_hash, email FROM users WHERE username = %s",
+                (ADA,),
+            ).fetchone()
         self.assertIsNotNone(row)
+        self.assertEqual(str(row["email"]), ADA)
         self.assertTrue(str(row["password_hash"]).startswith("$argon2id$"))
-        self.assertNotIn("correct-horse", str(row["password_hash"]))
+        self.assertNotIn(PASSWORD, str(row["password_hash"]))
         out = self.client.post("/auth/logout", headers=CSRF)
         self.assertEqual(out.status_code, 204)
         self.assertEqual(self.client.get("/auth/me").status_code, 401)
 
     def test_login_sets_cookie(self) -> None:
-        self.client.post(
+        created = self.client.post(
             "/auth/register",
-            json={"username": "bob", "password": "correct-horse", "tos_accepted": True},
+            json=_reg(BOB),
             headers=CSRF,
         )
-        self.client.post("/auth/logout", headers=CSRF)
+        self._verify(created.json()["id"])
         logged = self.client.post(
             "/auth/login",
-            json={"username": "bob", "password": "correct-horse"},
+            json={"username": BOB, "password": PASSWORD},
             headers=CSRF,
         )
         self.assertEqual(logged.status_code, 200)
-        self.assertEqual(self.client.get("/auth/me").json()["username"], "bob")
+        self.assertEqual(self.client.get("/auth/me").json()["username"], BOB)
 
-    def test_duplicate_username_is_case_insensitive(self) -> None:
+    def test_duplicate_email_is_case_insensitive(self) -> None:
         first = self.client.post(
             "/auth/register",
-            json={"username": "Casey", "password": "correct-horse", "tos_accepted": True},
+            json=_reg(CASEY),
             headers=CSRF,
         )
         self.assertEqual(first.status_code, 201)
         second = self.client.post(
             "/auth/register",
-            json={"username": "casey", "password": "correct-horse", "tos_accepted": True},
+            json=_reg("casey@example.com"),
             headers=CSRF,
         )
         self.assertEqual(second.status_code, 409)
 
     def test_invalid_register(self) -> None:
+        not_email = self.client.post(
+            "/auth/register",
+            json=_reg("eve"),
+            headers=CSRF,
+        )
+        self.assertEqual(not_email.status_code, 422)
         weak = self.client.post(
             "/auth/register",
-            json={"username": "eve", "password": "short", "tos_accepted": True},
+            json=_reg(EVE, password="short"),
             headers=CSRF,
         )
         self.assertEqual(weak.status_code, 422)
         tos = self.client.post(
             "/auth/register",
-            json={"username": "eve", "password": "correct-horse", "tos_accepted": False},
+            json=_reg(EVE, tos_accepted=False),
             headers=CSRF,
         )
         self.assertEqual(tos.status_code, 422)
+        no_name = self.client.post(
+            "/auth/register",
+            json=_reg(EVE, first_name=""),
+            headers=CSRF,
+        )
+        self.assertEqual(no_name.status_code, 422)
+
+    def test_login_requires_email_and_password(self) -> None:
+        bad_id = self.client.post(
+            "/auth/login",
+            json={"username": "bob", "password": PASSWORD},
+            headers=CSRF,
+        )
+        self.assertEqual(bad_id.status_code, 422)
+        short = self.client.post(
+            "/auth/login",
+            json={"username": BOB, "password": "short"},
+            headers=CSRF,
+        )
+        self.assertEqual(short.status_code, 422)
 
     def test_login_unknown_is_generic(self) -> None:
         response = self.client.post(
             "/auth/login",
-            json={"username": "nobody", "password": "correct-horse"},
+            json={"username": "nobody@example.com", "password": PASSWORD},
             headers=CSRF,
         )
         self.assertEqual(response.status_code, 401)
@@ -102,7 +173,7 @@ class AuthTests(unittest.TestCase):
     def test_csrf_required_on_post(self) -> None:
         response = self.client.post(
             "/auth/login",
-            json={"username": "bob", "password": "correct-horse"},
+            json={"username": BOB, "password": PASSWORD},
         )
         self.assertEqual(response.status_code, 403)
 
@@ -111,9 +182,15 @@ class AuthTests(unittest.TestCase):
         self.assertEqual(response.status_code, 204)
 
     def test_revoked_expired_idle_disabled_are_401(self) -> None:
-        self.client.post(
+        created = self.client.post(
             "/auth/register",
-            json={"username": "zed", "password": "correct-horse", "tos_accepted": True},
+            json=_reg(ZED),
+            headers=CSRF,
+        )
+        self._verify(created.json()["id"])
+        self.client.post(
+            "/auth/login",
+            json={"username": ZED, "password": PASSWORD},
             headers=CSRF,
         )
         self.assertEqual(self.client.get("/auth/me").status_code, 200)
@@ -124,7 +201,7 @@ class AuthTests(unittest.TestCase):
 
         logged = self.client.post(
             "/auth/login",
-            json={"username": "zed", "password": "correct-horse"},
+            json={"username": ZED, "password": PASSWORD},
             headers=CSRF,
         )
         self.assertEqual(logged.status_code, 200)
@@ -135,7 +212,7 @@ class AuthTests(unittest.TestCase):
 
         self.client.post(
             "/auth/login",
-            json={"username": "zed", "password": "correct-horse"},
+            json={"username": ZED, "password": PASSWORD},
             headers=CSRF,
         )
         with db.get_pool().connection() as conn:
@@ -145,7 +222,7 @@ class AuthTests(unittest.TestCase):
 
         self.client.post(
             "/auth/login",
-            json={"username": "zed", "password": "correct-horse"},
+            json={"username": ZED, "password": PASSWORD},
             headers=CSRF,
         )
         with db.get_pool().connection() as conn:
@@ -154,7 +231,7 @@ class AuthTests(unittest.TestCase):
         self.assertEqual(self.client.get("/auth/me").status_code, 401)
         disabled_login = self.client.post(
             "/auth/login",
-            json={"username": "zed", "password": "correct-horse"},
+            json={"username": ZED, "password": PASSWORD},
             headers=CSRF,
         )
         self.assertEqual(disabled_login.status_code, 401)

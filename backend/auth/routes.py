@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 
 from auth.deps import get_current_user, require_csrf
-from auth.service import AuthError, User, login, logout, register
+from auth.service import AuthError, User, login, logout, register, verify_email
 from auth.sessions import COOKIE_NAME, cookie_max_age, cookie_secure
 
 router = APIRouter()
@@ -14,6 +14,8 @@ router = APIRouter()
 
 class RegisterBody(BaseModel):
     username: str
+    first_name: str
+    last_name: str
     password: str
     tos_accepted: bool
 
@@ -21,6 +23,10 @@ class RegisterBody(BaseModel):
 class LoginBody(BaseModel):
     username: str
     password: str
+
+
+class VerifyBody(BaseModel):
+    token: str
 
 
 def _set_cookie(response: Response, token: str) -> None:
@@ -36,7 +42,13 @@ def _set_cookie(response: Response, token: str) -> None:
 
 
 def _clear_cookie(response: Response) -> None:
-    response.delete_cookie(COOKIE_NAME, path="/")
+    response.delete_cookie(
+        COOKIE_NAME,
+        path="/",
+        secure=cookie_secure(),
+        httponly=True,
+        samesite="lax",
+    )
 
 
 def _client(request: Request) -> tuple[str | None, str | None]:
@@ -44,16 +56,42 @@ def _client(request: Request) -> tuple[str | None, str | None]:
     return ip, request.headers.get("user-agent")
 
 
+def _user_json(user: User) -> dict:
+    return {
+        "id": str(user.id),
+        "username": user.username,
+        "first_name": user.first_name,
+        "last_name": user.last_name,
+    }
+
+
 @router.post("/register", status_code=201)
-def post_register(body: RegisterBody, request: Request, response: Response, _: None = Depends(require_csrf)) -> dict:
+def post_register(body: RegisterBody, request: Request, _: None = Depends(require_csrf)) -> dict:
     try:
-        user, token = register(body.username, body.password, body.tos_accepted, *_client(request))
+        user = register(
+            body.username,
+            body.first_name,
+            body.last_name,
+            body.password,
+            body.tos_accepted,
+            *_client(request),
+        )
     except RuntimeError as exc:
         raise HTTPException(503, str(exc)) from exc
     except AuthError as exc:
         raise HTTPException(exc.status, exc.detail) from exc
-    _set_cookie(response, token)
-    return {"id": str(user.id), "username": user.username}
+    return _user_json(user)
+
+
+@router.post("/verify")
+def post_verify(body: VerifyBody, _: None = Depends(require_csrf)) -> dict:
+    try:
+        verify_email(body.token)
+    except RuntimeError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    except AuthError as exc:
+        raise HTTPException(exc.status, exc.detail) from exc
+    return {"verified": True}
 
 
 @router.post("/login")
@@ -65,7 +103,7 @@ def post_login(body: LoginBody, request: Request, response: Response, _: None = 
     except AuthError as exc:
         raise HTTPException(exc.status, exc.detail) from exc
     _set_cookie(response, token)
-    return {"id": str(user.id), "username": user.username}
+    return _user_json(user)
 
 
 @router.post("/logout", status_code=204, response_model=None)
@@ -79,4 +117,4 @@ def post_logout(request: Request, response: Response, _: None = Depends(require_
 
 @router.get("/me")
 def get_me(user: User = Depends(get_current_user)) -> dict:
-    return {"id": str(user.id), "username": user.username}
+    return _user_json(user)

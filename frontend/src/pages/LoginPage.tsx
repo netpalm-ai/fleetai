@@ -17,7 +17,7 @@ export function LoginPage() {
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
-    setError(await signIn(String(form.get("username") ?? ""), String(form.get("password") ?? "")));
+    setError(await signIn(String(form.get("email") ?? ""), String(form.get("password") ?? "")));
   }
 
   return (
@@ -26,12 +26,27 @@ export function LoginPage() {
         <BrandMark large />
         <h1>Sign in</h1>
         <label className="field">
-          Username
-          <input name="username" autoComplete="username" autoFocus required />
+          Email
+          <input
+            name="email"
+            type="email"
+            autoComplete="email"
+            inputMode="email"
+            autoFocus
+            required
+            maxLength={254}
+          />
         </label>
         <label className="field">
           Password
-          <input name="password" type="password" autoComplete="current-password" minLength={10} required />
+          <input
+            name="password"
+            type="password"
+            autoComplete="current-password"
+            minLength={10}
+            maxLength={128}
+            required
+          />
         </label>
         {error ? <p className="form-error">{error}</p> : null}
         <button className="btn btn-primary btn-block" type="submit">
