@@ -154,12 +154,12 @@ class AuthTests(unittest.TestCase):
             headers=CSRF,
         )
         self.assertEqual(bad_id.status_code, 422)
-        short = self.client.post(
+        empty = self.client.post(
             "/auth/login",
-            json={"username": BOB, "password": "short"},
+            json={"username": BOB, "password": ""},
             headers=CSRF,
         )
-        self.assertEqual(short.status_code, 422)
+        self.assertEqual(empty.status_code, 422)
 
     def test_login_unknown_is_generic(self) -> None:
         response = self.client.post(

@@ -75,8 +75,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         if (!isEmail(name)) {
           return "Enter a valid email address.";
         }
-        if (password.length < MIN_PASSWORD || password.length > MAX_PASSWORD) {
-          return "Password must be 10 to 128 characters.";
+        if (!password || password.length > MAX_PASSWORD) {
+          return "Enter a password.";
         }
         try {
           const user = await request<AuthUser>("/auth/login", {

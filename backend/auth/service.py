@@ -142,7 +142,7 @@ def register(
 
 def login(username: str, password: str, ip: str | None, user_agent: str | None) -> tuple[User, str]:
     name = _normalize_email(username)
-    if not valid_email(name) or not passwords.valid_password(password):
+    if not valid_email(name) or not password or len(password) > passwords.MAX_PASSWORD:
         raise AuthError(422, "invalid")
     with db.get_pool().connection() as conn:
         row = conn.execute(

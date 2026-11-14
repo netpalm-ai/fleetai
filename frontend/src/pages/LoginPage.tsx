@@ -43,7 +43,7 @@ export function LoginPage() {
             name="password"
             type="password"
             autoComplete="current-password"
-            minLength={10}
+            minLength={4}
             maxLength={128}
             required
           />
