@@ -335,8 +335,9 @@ h3 {
 
 .tickets li {
   display: flex;
-  justify-content: space-between;
-  gap: 16px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
   padding: 16px 18px;
   border: 1px solid var(--line-soft);
   border-radius: 16px;
@@ -362,11 +363,33 @@ h3 {
 }
 
 .tickets .status {
+  margin-left: auto;
   color: var(--accent);
   font-size: 13px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  letter-spacing: 0.04em;
   font-weight: 600;
+  white-space: nowrap;
+}
+
+.ticket-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 10px;
+}
+
+.ticket-sep {
+  color: var(--muted-2);
+}
+
+.ticket-desc {
+  color: var(--muted);
+  font-size: 14.5px;
+  line-height: 1.45;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .auth {
@@ -416,7 +439,8 @@ h3 {
   font-weight: 600;
 }
 
-.field input {
+.field input:not([type="file"]),
+.field select {
   background: transparent;
   border: none;
   color: var(--text);
@@ -430,6 +454,7 @@ h3 {
 }
 
 .field input:focus,
+.field select:focus,
 .field textarea:focus {
   outline: none;
 }
@@ -450,19 +475,12 @@ h3 {
   min-height: 96px;
 }
 
-.field:focus-within {
+.field:focus-within:not(:has(.pdf-input:focus)) {
   border-color: var(--accent-strong);
 }
 
 .studio-error {
   margin: 0 0 16px;
-}
-
-.studio-live {
-  margin: 0 0 22px;
-  color: var(--accent);
-  font-size: 14.5px;
-  letter-spacing: 0.04em;
 }
 
 .studio {
@@ -489,6 +507,10 @@ h3 {
   margin: 18px 0 8px;
 }
 
+.settings {
+  max-width: 640px;
+}
+
 .seg {
   display: flex;
   gap: 8px;
@@ -496,6 +518,9 @@ h3 {
 }
 
 .seg-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
   font-family: var(--body);
   font-size: 13px;
   font-weight: 500;
@@ -515,29 +540,24 @@ h3 {
   border-color: rgba(255, 255, 255, 0.28);
 }
 
-.drop {
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 148px;
-  margin-top: 8px;
-  border: 1px dashed var(--accent-line);
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.02);
-  color: var(--muted);
-  font-size: 14.5px;
-  letter-spacing: 0;
-  text-transform: none;
-  font-weight: 400;
-  cursor: pointer;
+.pdf-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  overflow: hidden;
+  pointer-events: none;
 }
 
-.drop input {
-  position: absolute;
-  inset: 0;
-  opacity: 0;
-  cursor: pointer;
+.pdf-name {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
 }
 
 .board-head {
@@ -554,15 +574,18 @@ h3 {
 }
 
 .ticket-title {
-  margin-top: 4px;
-  color: var(--muted);
-  font-size: 14.5px;
+  margin: 0;
+  flex: 1 1 12ch;
+  min-width: 0;
+  color: var(--text);
+  font-size: 15px;
   letter-spacing: 0;
   text-transform: none;
   font-weight: 400;
 }
 
-.ticket-row.is-verifying {
+.ticket-row.is-verifying,
+.ticket-row.is-active {
   border-color: var(--accent-line);
   background: linear-gradient(180deg, rgba(230, 138, 54, 0.12), rgba(255, 255, 255, 0.02));
 }

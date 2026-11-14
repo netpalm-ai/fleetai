@@ -1,9 +1,41 @@
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type DragEvent } from "react";
-import { Link, Navigate } from "react-router-dom";
+import { Navigate } from "react-router-dom";
 import { ApiError, getJson, request } from "../api/client";
-import { BrandMark } from "../components/BrandMark";
+import { AppHeader } from "../components/AppHeader";
 import { useSession } from "../session";
 import type { Job, Ticket } from "../types";
+
+function handlingId(tickets: Ticket[]): string | null {
+  const unresolved = tickets.find((ticket) => ticket.status === "unresolved");
+  if (unresolved) {
+    return unresolved.id;
+  }
+  const verifying = tickets.find((ticket) => ticket.status === "verifying");
+  return verifying ? verifying.id : null;
+}
+
+function liveStatus(ticket: Ticket, running: boolean, activeId: string | null): string {
+  if (running && ticket.id === activeId) {
+    return ticket.status === "verifying" ? "Verifying…" : "Solving…";
+  }
+  if (ticket.status === "verifying") {
+    return "Verifying";
+  }
+  if (ticket.status === "fixed") {
+    return "Fixed";
+  }
+  if (ticket.status === "completed") {
+    return "Completed";
+  }
+  if (running && ticket.status === "unresolved") {
+    return "Queued";
+  }
+  return "Open";
+}
+
+function ticketBlurb(ticket: Ticket): string {
+  return (ticket.context || "").trim().replace(/\s+/g, " ");
+}
 
 function fileToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -91,6 +123,10 @@ export function TicketsPage() {
         .catch((err: unknown) => {
           setBusy(false);
           stopPoll();
+          if (err instanceof ApiError && err.status === 401) {
+            void signOut();
+            return;
+          }
           setError(err instanceof Error ? err.message : "job poll failed");
         });
     };
@@ -113,10 +149,18 @@ export function TicketsPage() {
     if (file) {
       void acceptPdf(file);
     }
+    event.target.value = "";
+    event.target.blur();
   }
 
-  function onDrop(event: DragEvent<HTMLLabelElement>) {
+  function onPdfDragOver(event: DragEvent) {
     event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+  }
+
+  function onPdfDrop(event: DragEvent) {
+    event.preventDefault();
+    setListMode("pdf");
     const file = event.dataTransfer.files[0];
     if (file) {
       void acceptPdf(file);
@@ -164,23 +208,11 @@ export function TicketsPage() {
   }
 
   const running = busy || job?.status === "running";
-  const active = tickets?.find((ticket) => ticket.status === "verifying");
+  const activeId = tickets && running ? handlingId(tickets) : null;
 
   return (
     <>
-      <header className="site-header">
-        <div className="nav nav-wide">
-          <Link to="/">
-            <BrandMark />
-          </Link>
-          <div className="nav-end">
-            <span className="nav-user">{username}</span>
-            <button type="button" className="btn btn-ghost" onClick={() => void signOut()}>
-              Sign out
-            </button>
-          </div>
-        </div>
-      </header>
+      <AppHeader />
       <main className="shell shell-wide">
         <div className="page-head">
           <div>
@@ -189,11 +221,6 @@ export function TicketsPage() {
           </div>
         </div>
         {error ? <p className="form-error studio-error">{error}</p> : null}
-        {running ? (
-          <p className="studio-live">
-            {active ? "Solving " + active.id + (active.title ? " — " + active.title : "") : "Parsing and running the pipeline…"}
-          </p>
-        ) : null}
 
         <div className="studio">
           <section className="intake">
@@ -219,15 +246,24 @@ export function TicketsPage() {
                 >
                   Paste text
                 </button>
-                <button
-                  type="button"
+                <label
                   role="tab"
                   aria-selected={listMode === "pdf"}
                   className={listMode === "pdf" ? "seg-btn on" : "seg-btn"}
                   onClick={() => setListMode("pdf")}
+                  onDragOver={onPdfDragOver}
+                  onDrop={onPdfDrop}
                 >
-                  Upload PDF
-                </button>
+                  <input
+                    className="pdf-input"
+                    type="file"
+                    accept="application/pdf,.pdf"
+                    tabIndex={-1}
+                    aria-hidden="true"
+                    onChange={onPdf}
+                  />
+                  Upload or Drop PDF here
+                </label>
               </div>
               {listMode === "paste" ? (
                 <textarea
@@ -237,12 +273,9 @@ export function TicketsPage() {
                   value={listText}
                   onChange={(event) => setListText(event.target.value)}
                 />
-              ) : (
-                <label className="drop" onDragOver={(event) => event.preventDefault()} onDrop={onDrop}>
-                  <input type="file" accept="application/pdf,.pdf" onChange={onPdf} />
-                  <span>{pdfName ?? "Drop or choose a .pdf"}</span>
-                </label>
-              )}
+              ) : pdfName ? (
+                <p className="pdf-name">{pdfName}</p>
+              ) : null}
             </div>
             <label className="field">
               Project context
@@ -262,23 +295,35 @@ export function TicketsPage() {
           <section className="board">
             <div className="board-head">
               <h2>Tickets</h2>
-              <button type="button" className="btn btn-ghost" onClick={load}>
-                Refresh
-              </button>
             </div>
             {tickets == null && !error ? <p className="muted">Loading tickets…</p> : null}
-            {tickets && tickets.length === 0 ? <p className="muted">No tickets yet. Resolve to parse a list.</p> : null}
+            {tickets && tickets.length === 0 ? (
+              <p className="muted">
+                {running ? "Parsing the list…" : "No tickets yet. Resolve to parse a list."}
+              </p>
+            ) : null}
             {tickets && tickets.length > 0 ? (
               <ul className="tickets">
-                {tickets.map((ticket) => (
-                  <li key={ticket.id} className={"ticket-row is-" + ticket.status}>
-                    <div>
-                      <span className="id">{ticket.id}</span>
-                      {ticket.title ? <p className="ticket-title">{ticket.title}</p> : null}
-                    </div>
-                    <span className="status">{ticket.status}</span>
-                  </li>
-                ))}
+                {tickets.map((ticket) => {
+                  const blurb = ticketBlurb(ticket);
+                  const active = ticket.id === activeId;
+                  return (
+                    <li
+                      key={ticket.id}
+                      className={
+                        "ticket-row is-" + ticket.status + (active ? " is-active" : "")
+                      }
+                    >
+                      <p className="ticket-line">
+                        <span className="id">{ticket.id}</span>
+                        <span className="ticket-sep">—</span>
+                        <span className="ticket-title">{ticket.title || "Untitled"}</span>
+                        <span className="status">{liveStatus(ticket, running, activeId)}</span>
+                      </p>
+                      {blurb ? <p className="ticket-desc">{blurb}</p> : null}
+                    </li>
+                  );
+                })}
               </ul>
             ) : null}
           </section>

@@ -10,9 +10,7 @@ contains those checkouts. `backend/` is the API. `frontend/` is the web app.
 ```bash
 conda activate dev
 cd backend
-python orchestrator.py                 # parse, solve, verify, archive solved
-python main.py                         # list tickets
-python main.py complete JMD-30SEP-05   # live QA only; sets completed, not fixed
+uvicorn api:app                        # needs Postgres; see docs/project.md
 ```
 
 ```bash

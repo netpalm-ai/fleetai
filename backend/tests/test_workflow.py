@@ -1,15 +1,13 @@
-"""Workflow helpers: parse merge, verdicts, complete, run logs."""
+"""Workflow helpers: parse merge, verdicts, locks, intake validation."""
 
 from __future__ import annotations
 
-import io
-import json
 import threading
 import unittest
-from contextlib import redirect_stdout
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
+from uuid import uuid4
 
 import pymupdf
 
@@ -18,23 +16,18 @@ import solver
 import verifier
 from config import (
     BLOCKED,
-    COMPLETED,
     FAILED,
     FIXED,
     READY,
     UNRESOLVED,
     VERIFYING,
     apply_workflow,
-    archive_solved,
     last_verdict,
-    load_tickets,
     normalize_ticket,
     agent_context,
     engineering_standard,
     product_areas,
-    save_tickets,
     tech_ticket,
-    write_run_log,
 )
 
 
@@ -171,7 +164,7 @@ class LastVerdictTests(unittest.TestCase):
 
 class ApplyWorkflowTests(unittest.TestCase):
     def test_keeps_in_flight_body_and_updates_report_status(self) -> None:
-        prior = _ticket("T1", FIXED, title="old", solver_run_id="run-1")
+        prior = _ticket("T1", FIXED, title="old")
         incoming = _ticket(
             "T1",
             UNRESOLVED,
@@ -179,160 +172,97 @@ class ApplyWorkflowTests(unittest.TestCase):
             repos=[],
             report_status="Partially Fixed",
         )
-        out = apply_workflow([incoming], [prior])
+        out = apply_workflow([incoming], [prior], {})
         self.assertEqual(out[0]["title"], "old")
         self.assertEqual(out[0]["status"], FIXED)
         self.assertEqual(out[0]["repos"], [{"name": "fe"}])
-        self.assertEqual(out[0]["solver_run_id"], "run-1")
         self.assertEqual(out[0]["report_status"], "Partially Fixed")
 
     def test_keeps_omitted_in_flight_ticket(self) -> None:
         prior = _ticket("T1", VERIFYING)
-        self.assertEqual(apply_workflow([], [prior])[0]["id"], "T1")
+        self.assertEqual(apply_workflow([], [prior], {})[0]["id"], "T1")
 
     def test_unresolved_takes_new_body_and_keeps_repos(self) -> None:
         prior = _ticket("T1", UNRESOLVED, title="old")
         incoming = _ticket("T1", UNRESOLVED, title="new", repos=[])
-        out = apply_workflow([incoming], [prior])
+        out = apply_workflow([incoming], [prior], {})
         self.assertEqual(out[0]["title"], "new")
         self.assertEqual(out[0]["status"], UNRESOLVED)
         self.assertEqual(out[0]["repos"], [{"name": "fe"}])
 
     def test_skips_archived_ticket_when_still_the_same(self) -> None:
-        with TemporaryDirectory() as raw:
-            solved = Path(raw)
-            archived = _ticket("T1", FIXED)
-            (solved / "T1.json").write_text(json.dumps(archived) + "\n", encoding="utf-8")
-            incoming = _ticket("T1", UNRESOLVED, title="rewritten")
-            self.assertEqual(apply_workflow([incoming], [], solved), [])
+        archived = {"T1": _ticket("T1", FIXED)}
+        incoming = _ticket("T1", UNRESOLVED, title="rewritten")
+        self.assertEqual(apply_workflow([incoming], [], archived), [])
 
     def test_skips_archived_ticket_restated_on_retest_list(self) -> None:
-        with TemporaryDirectory() as raw:
-            solved = Path(raw)
-            archived = _ticket("T1", FIXED, context="original long context")
-            (solved / "T1.json").write_text(json.dumps(archived) + "\n", encoding="utf-8")
-            incoming = _ticket(
-                "T1",
-                UNRESOLVED,
-                context="must pass acceptance before evaluation; remains on the retest list",
-                expected="persistent alert on interruption",
-            )
-            self.assertEqual(apply_workflow([incoming], [], solved), [])
+        archived = {"T1": _ticket("T1", FIXED, context="original long context")}
+        incoming = _ticket(
+            "T1",
+            UNRESOLVED,
+            context="must pass acceptance before evaluation; remains on the retest list",
+            expected="persistent alert on interruption",
+        )
+        self.assertEqual(apply_workflow([incoming], [], archived), [])
 
     def test_reopens_archived_ticket_when_retest_failed(self) -> None:
-        with TemporaryDirectory() as raw:
-            solved = Path(raw)
-            archived = _ticket("T1", FIXED, repos=[{"name": "fe"}])
-            (solved / "T1.json").write_text(json.dumps(archived) + "\n", encoding="utf-8")
-            incoming = _ticket(
-                "T1",
-                UNRESOLVED,
-                repos=[],
-                kind="recurrent",
-                context="Wi-Fi off for 60s during recording; only a timeout toast, expected modal did not appear",
-            )
-            out = apply_workflow([incoming], [], solved)
-            self.assertEqual(len(out), 1)
-            self.assertEqual(out[0]["status"], UNRESOLVED)
-            self.assertEqual(out[0]["kind"], "recurrent")
-            self.assertEqual(out[0]["repos"], [{"name": "fe"}])
+        archived = {"T1": _ticket("T1", FIXED, repos=[{"name": "fe"}])}
+        incoming = _ticket(
+            "T1",
+            UNRESOLVED,
+            repos=[],
+            kind="recurrent",
+            context="Wi-Fi off for 60s during recording; only a timeout toast, expected modal did not appear",
+        )
+        out = apply_workflow([incoming], [], archived)
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0]["status"], UNRESOLVED)
+        self.assertEqual(out[0]["kind"], "recurrent")
+        self.assertEqual(out[0]["repos"], [{"name": "fe"}])
 
     def test_skips_solved_id_if_kind_is_not_recurrent(self) -> None:
-        with TemporaryDirectory() as raw:
-            solved = Path(raw)
-            archived = _ticket("T1", FIXED)
-            (solved / "T1.json").write_text(json.dumps(archived) + "\n", encoding="utf-8")
-            incoming = _ticket(
-                "T1",
-                UNRESOLVED,
-                context="Wi-Fi off for 60s; expected modal did not appear",
-            )
-            self.assertEqual(apply_workflow([incoming], [], solved), [])
+        archived = {"T1": _ticket("T1", FIXED)}
+        incoming = _ticket(
+            "T1",
+            UNRESOLVED,
+            context="Wi-Fi off for 60s; expected modal did not appear",
+        )
+        self.assertEqual(apply_workflow([incoming], [], archived), [])
 
     def test_keeps_new_ids_and_drops_restated_solved(self) -> None:
-        with TemporaryDirectory() as raw:
-            solved = Path(raw)
-            archived = _ticket("JMD-12OCT-01", FIXED)
-            (solved / "JMD-12OCT-01.json").write_text(json.dumps(archived) + "\n", encoding="utf-8")
-            restated = _ticket(
-                "JMD-12OCT-01",
-                UNRESOLVED,
-                context="Silent omission of consultation content. Confirm root cause.",
-            )
-            fresh = _ticket(
-                "EV-01",
-                UNRESOLVED,
-                title="Original SNOMED CT suggestions missing from frozen snapshot",
-                context="Original SNOMED CT suggestions missing from the frozen pre-edit snapshot",
-                expected="State 2 snapshot includes original SNOMED suggestions",
-            )
-            out = apply_workflow([restated, fresh], [], solved)
-            self.assertEqual([item["id"] for item in out], ["EV-01"])
-            self.assertEqual(out[0]["status"], UNRESOLVED)
-
-
-class ArchiveSolvedTests(unittest.TestCase):
-    def test_moves_fixed_and_completed_keeps_open(self) -> None:
-        with TemporaryDirectory() as raw:
-            root = Path(raw)
-            path = root / "tickets.json"
-            solved = root / "solved"
-            save_tickets(
-                [
-                    _ticket("T1", FIXED),
-                    _ticket("T2", COMPLETED),
-                    _ticket("T3", UNRESOLVED),
-                    _ticket("T4", VERIFYING),
-                ],
-                path,
-            )
-            with redirect_stdout(io.StringIO()):
-                moved = archive_solved(path, solved)
-            self.assertEqual([item["id"] for item in moved], ["T1", "T2"])
-            self.assertEqual([item["id"] for item in load_tickets(path)], ["T3", "T4"])
-            self.assertEqual(json.loads((solved / "T1.json").read_text(encoding="utf-8"))["status"], FIXED)
-            self.assertEqual(json.loads((solved / "T2.json").read_text(encoding="utf-8"))["status"], COMPLETED)
-
-    def test_parks_sources_when_working_list_empty(self) -> None:
-        with TemporaryDirectory() as raw:
-            root = Path(raw)
-            path = root / "tickets.json"
-            solved = root / "solved"
-            email = root / "email.desc.txt"
-            report = root / "list.pdf"
-            save_tickets([_ticket("T1", FIXED)], path)
-            email.write_text("previous email\n", encoding="utf-8")
-            report.write_bytes(b"%PDF")
-            with redirect_stdout(io.StringIO()):
-                archive_solved(path, solved, sources=(email, report))
-            self.assertEqual(load_tickets(path), [])
-            self.assertFalse(email.exists())
-            self.assertFalse(report.exists())
-            self.assertEqual((solved / "email.desc.txt").read_text(encoding="utf-8"), "previous email\n")
-            self.assertEqual((solved / "list.pdf").read_bytes(), b"%PDF")
+        archived = {"JMD-12OCT-01": _ticket("JMD-12OCT-01", FIXED)}
+        restated = _ticket(
+            "JMD-12OCT-01",
+            UNRESOLVED,
+            context="Silent omission of consultation content. Confirm root cause.",
+        )
+        fresh = _ticket(
+            "EV-01",
+            UNRESOLVED,
+            title="Original SNOMED CT suggestions missing from frozen snapshot",
+            context="Original SNOMED CT suggestions missing from the frozen pre-edit snapshot",
+            expected="State 2 snapshot includes original SNOMED suggestions",
+        )
+        out = apply_workflow([restated, fresh], [], archived)
+        self.assertEqual([item["id"] for item in out], ["EV-01"])
+        self.assertEqual(out[0]["status"], UNRESOLVED)
 
 
 class WorkflowLockTests(unittest.TestCase):
-    def setUp(self) -> None:
-        self.tmp = TemporaryDirectory()
-        self.prior = config.LOCK_PATH
-        config.LOCK_PATH = Path(self.tmp.name) / ".lock"
-
-    def tearDown(self) -> None:
-        config.LOCK_PATH = self.prior
-        self.tmp.cleanup()
-
     def test_nested_lock_does_not_block(self) -> None:
-        with config.workflow_lock():
-            with config.workflow_lock():
-                self.assertTrue(config.workflow_busy())
+        user = uuid4()
+        with config.workflow_lock(user):
+            with config.workflow_lock(user):
+                self.assertTrue(config.workflow_busy(user))
+        self.assertFalse(config.workflow_busy(user))
 
     def test_other_thread_is_busy(self) -> None:
+        user = uuid4()
         held = threading.Event()
         release = threading.Event()
 
         def hold() -> None:
-            with config.workflow_lock():
+            with config.workflow_lock(user):
                 held.set()
                 release.wait()
 
@@ -340,65 +270,18 @@ class WorkflowLockTests(unittest.TestCase):
         thread.start()
         held.wait()
         try:
-            self.assertTrue(config.workflow_busy())
+            self.assertTrue(config.workflow_busy(user))
             with self.assertRaises(config.WorkflowBusy):
-                with config.workflow_lock(blocking=False):
+                with config.workflow_lock(user, blocking=False):
                     pass
         finally:
             release.set()
             thread.join()
-        self.assertFalse(config.workflow_busy())
+        self.assertFalse(config.workflow_busy(user))
 
-
-class CompleteTests(unittest.TestCase):
-    def test_complete_sets_completed(self) -> None:
-        with TemporaryDirectory() as raw:
-            root = Path(raw)
-            path = root / "tickets.json"
-            solved = root / "solved"
-            save_tickets([_ticket("T1", VERIFYING)], path)
-            with redirect_stdout(io.StringIO()):
-                solver.complete("T1", path, solved)
-            self.assertEqual(load_tickets(path), [])
-            self.assertEqual(json.loads((solved / "T1.json").read_text(encoding="utf-8"))["status"], COMPLETED)
-
-    def test_complete_rejects_fixed(self) -> None:
-        with TemporaryDirectory() as raw:
-            path = Path(raw) / "tickets.json"
-            save_tickets([_ticket("T1", FIXED)], path)
-            with self.assertRaises(SystemExit):
-                solver.complete("T1", path)
-            self.assertEqual(load_tickets(path)[0]["status"], FIXED)
-
-
-class RunLogTests(unittest.TestCase):
-    def test_writes_prompt_verdict_files_and_tests(self) -> None:
-        with TemporaryDirectory() as raw:
-            runs = Path(raw)
-            path = write_run_log(
-                "JMD-12OCT-01",
-                "solve",
-                READY,
-                "fix the ticket",
-                "changed jmd-frontend/src/App.tsx\nnpm run test:run -- parse.test.ts\nVERDICT: ready",
-                "run-abc",
-                runs,
-            )
-            text = path.read_text(encoding="utf-8")
-            self.assertEqual(path.name, "JMD-12OCT-01-run-abc.md")
-            self.assertIn("- verdict: ready", text)
-            self.assertIn("fix the ticket", text)
-            self.assertIn("jmd-frontend/src/App.tsx", text)
-            self.assertIn("npm run test:run -- parse.test.ts", text)
-            self.assertIn("## Result", text)
-
-
-def _minimal_pdf() -> bytes:
-    document = pymupdf.open()
-    document.new_page()
-    data = document.tobytes()
-    document.close()
-    return data
+    def test_other_user_is_not_busy(self) -> None:
+        with config.workflow_lock(uuid4()):
+            self.assertFalse(config.workflow_busy(uuid4()))
 
 
 def _encrypted_pdf() -> bytes:
@@ -409,59 +292,25 @@ def _encrypted_pdf() -> bytes:
     return data
 
 
-class SaveIntakeTests(unittest.TestCase):
-    def setUp(self) -> None:
-        self.tmp = TemporaryDirectory()
-        root = Path(self.tmp.name)
-        self.root = root
-        self.patches = [
-            patch.object(config, "TICKETS_DIR", root),
-            patch.object(config, "EMAIL_PATH", root / "email.desc.txt"),
-            patch.object(config, "PDF_PATH", root / "list.pdf"),
-            patch.object(config, "LIST_TEXT_PATH", root / "list.txt"),
-            patch.object(config, "ADDITIONAL_CONTEXT_PATH", root / "additional_context.pdf"),
-            patch.object(config, "CONTEXT_MD_PATH", root / "additional_context.md"),
-            patch.object(config, "LOCK_PATH", root / ".lock"),
-        ]
-        for item in self.patches:
-            item.start()
-
-    def tearDown(self) -> None:
-        for item in self.patches:
-            item.stop()
-        self.tmp.cleanup()
-
-    def test_writes_text_and_clears_pdf(self) -> None:
-        (self.root / "list.pdf").write_bytes(b"%PDF")
-        config.save_intake("email body", "ticket list", "# project", None)
-        self.assertEqual((self.root / "email.desc.txt").read_text(encoding="utf-8"), "email body\n")
-        self.assertEqual((self.root / "list.txt").read_text(encoding="utf-8"), "ticket list\n")
-        self.assertEqual((self.root / "additional_context.md").read_text(encoding="utf-8"), "# project\n")
-        self.assertFalse((self.root / "list.pdf").exists())
-
-    def test_pdf_clears_list_text(self) -> None:
-        pdf = _minimal_pdf()
-        (self.root / "list.txt").write_text("old\n", encoding="utf-8")
-        config.save_intake("", "", "", pdf)
-        self.assertEqual((self.root / "list.pdf").read_bytes(), pdf)
-        self.assertFalse((self.root / "list.txt").exists())
-        self.assertFalse((self.root / "email.desc.txt").exists())
+class SaveIntakeValidationTests(unittest.TestCase):
+    def _save(self, email: str, list_text: str, context: str, pdf: bytes | None) -> None:
+        config.save_intake(email, list_text, context, pdf, uuid4(), None)
 
     def test_rejects_empty(self) -> None:
         with self.assertRaises(RuntimeError):
-            config.save_intake("", "", "", None)
+            self._save("", "", "", None)
 
     def test_rejects_non_pdf(self) -> None:
         with self.assertRaises(RuntimeError):
-            config.save_intake("", "", "", b"hello")
+            self._save("", "", "", b"hello")
 
     def test_rejects_truncated_pdf(self) -> None:
         with self.assertRaises(RuntimeError):
-            config.save_intake("", "", "", b"%PDF-1.4")
+            self._save("", "", "", b"%PDF-1.4")
 
     def test_rejects_encrypted_pdf(self) -> None:
         with self.assertRaises(RuntimeError):
-            config.save_intake("", "", "", _encrypted_pdf())
+            self._save("", "", "", _encrypted_pdf())
 
 
 if __name__ == "__main__":

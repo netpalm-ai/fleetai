@@ -2,15 +2,16 @@
 
 from __future__ import annotations
 
-import fcntl
-import json
 import os
 import threading
 import uuid
 from contextlib import contextmanager
 from pathlib import Path
+from uuid import UUID
 
 import pymupdf
+
+import intakes
 
 ROOT = Path(__file__).resolve().parent
 
@@ -43,34 +44,19 @@ def require_env_int(name: str) -> int:
     return int(require_env(name))
 
 
-TICKETS_DIR = ROOT / "tickets"
-PDF_PATH = TICKETS_DIR / "list.pdf"
-LIST_TEXT_PATH = TICKETS_DIR / "list.txt"
-EMAIL_PATH = TICKETS_DIR / "email.desc.txt"
-ADDITIONAL_CONTEXT_PATH = TICKETS_DIR / "additional_context.pdf"
-CONTEXT_MD_PATH = TICKETS_DIR / "additional_context.md"
 INTAKE_PDF_MAX = 50 * 1024 * 1024
 INTAKE_TEXT_MAX = 512 * 1024
-TICKETS_PATH = TICKETS_DIR / "unsolved_tickets.json"
-SOLVED_DIR = TICKETS_DIR / "solved"
-RUNS_DIR = TICKETS_DIR / "runs"
-JOBS_DIR = TICKETS_DIR / "jobs"
 CONTEXT_PATH = ROOT / "codebase" / "code-context.md"
 ENGINEERING_PATH = ROOT / "codebase" / "engineering.md"
-LOCK_PATH = TICKETS_DIR / ".lock"
 VERSION = "0.1.0"
-_thread_lock = threading.RLock()
+_user_locks: dict[UUID, threading.Lock] = {}
+_user_locks_guard = threading.Lock()
 _held = threading.local()
-_in_use = threading.Event()
+_jobs: dict[UUID, dict] = {}
 
 
 class WorkflowBusy(RuntimeError):
     pass
-
-
-def _unlink(path: Path) -> None:
-    if path.is_file():
-        path.unlink()
 
 
 _PDF_REJECT = ("/JavaScript", "/EmbeddedFiles", "/Launch", "/RichMedia")
@@ -101,29 +87,13 @@ def _require_pdf(pdf: bytes) -> None:
         document.close()
 
 
-def _record_file(user_id, session_id, intake_type: str, fmt: str, data: bytes, suffix: str) -> None:
-    if user_id is None:
-        return
-    import intakes
-
-    intakes.put(user_id, session_id, intake_type, fmt, data, suffix)
-
-
-def _deactivate_file(user_id, intake_type: str) -> None:
-    if user_id is None:
-        return
-    import intakes
-
-    intakes.deactivate(user_id, intake_type)
-
-
 def save_intake(
     email: str,
     list_text: str,
     context: str,
     pdf: bytes | None,
-    user_id=None,
-    session_id=None,
+    user_id: UUID,
+    session_id: UUID | None,
 ) -> None:
     email = (email or "").strip()
     list_text = (list_text or "").strip()
@@ -136,91 +106,59 @@ def save_intake(
         raise RuntimeError("intake text is too large")
     if not email and not list_text and not pdf:
         raise RuntimeError("need an email or a ticket list")
-    with workflow_lock(blocking=False):
-        TICKETS_DIR.mkdir(parents=True, exist_ok=True)
+    with workflow_lock(user_id, blocking=False):
         if email:
-            body = email + "\n"
-            EMAIL_PATH.write_text(body, encoding="utf-8")
-            _record_file(user_id, session_id, "email_desc", "txt", body.encode("utf-8"), ".txt")
+            intakes.put(user_id, session_id, "email_desc", "txt", (email + "\n").encode("utf-8"))
         else:
-            _unlink(EMAIL_PATH)
-            _deactivate_file(user_id, "email_desc")
+            intakes.deactivate(user_id, "email_desc")
         if pdf is not None:
-            PDF_PATH.write_bytes(pdf)
-            _unlink(LIST_TEXT_PATH)
-            _record_file(user_id, session_id, "ticket_list", "pdf", pdf, ".pdf")
+            intakes.put(user_id, session_id, "ticket_list", "pdf", pdf)
         elif list_text:
-            body = list_text + "\n"
-            LIST_TEXT_PATH.write_text(body, encoding="utf-8")
-            _unlink(PDF_PATH)
-            _record_file(user_id, session_id, "ticket_list", "txt", body.encode("utf-8"), ".txt")
+            intakes.put(user_id, session_id, "ticket_list", "txt", (list_text + "\n").encode("utf-8"))
         else:
-            _unlink(LIST_TEXT_PATH)
-            _unlink(PDF_PATH)
-            _deactivate_file(user_id, "ticket_list")
+            intakes.deactivate(user_id, "ticket_list")
         if context:
-            body = context + "\n"
-            CONTEXT_MD_PATH.write_text(body, encoding="utf-8")
-            _unlink(ADDITIONAL_CONTEXT_PATH)
-            _record_file(user_id, session_id, "project_context", "md", body.encode("utf-8"), ".md")
+            intakes.put(user_id, session_id, "project_context", "md", (context + "\n").encode("utf-8"))
         else:
-            _unlink(CONTEXT_MD_PATH)
-            _unlink(ADDITIONAL_CONTEXT_PATH)
-            _deactivate_file(user_id, "project_context")
+            intakes.deactivate(user_id, "project_context")
 
 
-def workflow_busy() -> bool:
-    if _in_use.is_set():
-        return True
-    LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
-    fd = os.open(LOCK_PATH, os.O_CREAT | os.O_RDWR)
-    try:
-        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        fcntl.flock(fd, fcntl.LOCK_UN)
-        return False
-    except BlockingIOError:
-        return True
-    finally:
-        os.close(fd)
+def _user_lock(user_id: UUID) -> threading.Lock:
+    with _user_locks_guard:
+        return _user_locks.setdefault(user_id, threading.Lock())
+
+
+def workflow_busy(user_id: UUID) -> bool:
+    return _user_lock(user_id).locked()
 
 
 @contextmanager
-def workflow_lock(blocking: bool = True):
-    depth = getattr(_held, "depth", 0)
-    if depth:
-        _held.depth = depth + 1
+def workflow_lock(user_id: UUID, blocking: bool = True):
+    held = getattr(_held, "depth", None)
+    if held is None:
+        held = _held.depth = {}
+    if held.get(user_id):
+        held[user_id] += 1
         try:
             yield
         finally:
-            _held.depth -= 1
+            held[user_id] -= 1
         return
-    if not _thread_lock.acquire(blocking=blocking):
+    lock = _user_lock(user_id)
+    if not lock.acquire(blocking=blocking):
         raise WorkflowBusy("workflow busy")
-    LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
-    fd = os.open(LOCK_PATH, os.O_CREAT | os.O_RDWR)
-    try:
-        flags = fcntl.LOCK_EX if blocking else fcntl.LOCK_EX | fcntl.LOCK_NB
-        fcntl.flock(fd, flags)
-    except BlockingIOError:
-        os.close(fd)
-        _thread_lock.release()
-        raise WorkflowBusy("workflow busy")
-    _held.depth = 1
-    _in_use.set()
+    held[user_id] = 1
     try:
         yield
     finally:
-        _held.depth = 0
-        _in_use.clear()
-        fcntl.flock(fd, fcntl.LOCK_UN)
-        os.close(fd)
-        _thread_lock.release()
+        held[user_id] = 0
+        lock.release()
 
 
 def locked(fn):
-    def wrapped(*args, **kwargs):
-        with workflow_lock():
-            return fn(*args, **kwargs)
+    def wrapped(user_id: UUID, *args, **kwargs):
+        with workflow_lock(user_id):
+            return fn(user_id, *args, **kwargs)
 
     wrapped.__name__ = fn.__name__
     wrapped.__doc__ = fn.__doc__
@@ -232,7 +170,6 @@ COMPLETED = "completed"
 FIXED = "fixed"
 TICKET_STATES = (UNRESOLVED, VERIFYING, COMPLETED, FIXED)
 IN_FLIGHT = (VERIFYING, COMPLETED, FIXED)
-SOLVED = (FIXED, COMPLETED)
 READY = "ready"
 BLOCKED = "blocked"
 FAILED = "failed"
@@ -283,13 +220,6 @@ def _safe_name(value: str) -> str:
 
 def tech_ticket(ticket: dict) -> dict:
     return {key: ticket[key] for key in TECH_FIELDS if key in ticket}
-
-
-def ticket_where(ticket: dict) -> str:
-    repos = ", ".join(
-        repo.get("name", "") for repo in ticket.get("repos") or [] if isinstance(repo, dict)
-    )
-    return repos or ", ".join(ticket.get("services") or [])
 
 
 def normalize_status(value: object, default: str | None = UNRESOLVED) -> str | None:
@@ -362,18 +292,7 @@ def last_verdict(text: str | None) -> str | None:
     return None
 
 
-def load_solved(solved_dir: Path = SOLVED_DIR) -> dict[str, dict]:
-    if not solved_dir.is_dir():
-        return {}
-    tickets = {}
-    for path in sorted(solved_dir.glob("*.json")):
-        ticket = json.loads(path.read_text(encoding="utf-8"))
-        tickets[str(ticket["id"])] = ticket
-    return tickets
-
-
-def solved_prompt(solved_dir: Path = SOLVED_DIR) -> str:
-    tickets = load_solved(solved_dir)
+def solved_prompt(tickets: dict[str, dict]) -> str:
     if not tickets:
         return "(none)"
     return "\n".join(
@@ -395,8 +314,7 @@ def is_reopened(incoming: dict, solved: dict) -> bool:
     )
 
 
-def apply_workflow(tickets: list[dict], existing: list[dict], solved_dir: Path = SOLVED_DIR) -> list[dict]:
-    archived = load_solved(solved_dir)
+def apply_workflow(tickets: list[dict], existing: list[dict], archived: dict[str, dict]) -> list[dict]:
     previous = {item["id"]: item for item in existing}
     seen: set[str] = set()
     merged: list[dict] = []
@@ -431,123 +349,44 @@ def apply_workflow(tickets: list[dict], existing: list[dict], solved_dir: Path =
     return merged
 
 
-def load_tickets(path: Path = TICKETS_PATH) -> list[dict]:
-    return normalize_tickets(json.loads(path.read_text(encoding="utf-8"))) if path.is_file() else []
-
-
-def save_tickets(tickets: list[dict], path: Path = TICKETS_PATH) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(tickets, indent=2) + "\n", encoding="utf-8")
-
-
-def find_ticket(ticket_id: str, path: Path = TICKETS_PATH, solved_dir: Path = SOLVED_DIR) -> dict | None:
-    ticket = next((item for item in load_tickets(path) if item["id"] == ticket_id), None)
-    if ticket is not None:
-        return ticket
-    return load_solved(solved_dir).get(ticket_id)
-
-
-def require_ticket(ticket_id: str, path: Path = TICKETS_PATH) -> dict:
-    ticket = next((item for item in load_tickets(path) if item["id"] == ticket_id), None)
+def require_ticket(user_id: UUID, ticket_id: str) -> dict:
+    ticket = intakes.find_ticket(user_id, ticket_id)
     if ticket is None:
         raise SystemExit("ticket not found: {0}".format(ticket_id))
     return ticket
 
 
-def set_ticket_status(ticket_id: str, status: str, run_id: str | None = None, path: Path = TICKETS_PATH) -> dict:
-    tickets = load_tickets(path)
-    ticket = next((item for item in tickets if item["id"] == ticket_id), None)
-    if ticket is None:
-        raise RuntimeError("ticket not found: {0}".format(ticket_id))
-    ticket["status"] = normalize_status(status)
-    if run_id:
-        ticket["solver_run_id"] = run_id
-    save_tickets(tickets, path)
-    return ticket
-
-
-def archive_solved(path: Path = TICKETS_PATH, solved_dir: Path = SOLVED_DIR, sources=None) -> list[dict]:
-    keep = []
-    moved = []
-    solved_dir.mkdir(parents=True, exist_ok=True)
-    for ticket in load_tickets(path):
-        if ticket.get("status") in SOLVED:
-            (solved_dir / "{0}.json".format(_safe_name(ticket["id"]))).write_text(
-                json.dumps(ticket, indent=2) + "\n", encoding="utf-8"
-            )
-            moved.append(ticket)
-            print("{0}\tarchived".format(ticket["id"]))
-        else:
-            keep.append(ticket)
-    save_tickets(keep, path)
-    if not keep:
-        if sources is None:
-            sources = (
-                EMAIL_PATH,
-                PDF_PATH,
-                LIST_TEXT_PATH,
-                ADDITIONAL_CONTEXT_PATH,
-                CONTEXT_MD_PATH,
-            ) if path.resolve() == TICKETS_PATH.resolve() else ()
-        for src in sources:
-            if src.is_file():
-                src.replace(solved_dir / src.name)
-                print("{0}\tarchived".format(src.name))
-    return moved
-
-
-def save_job(job: dict, jobs_dir: Path = JOBS_DIR) -> dict:
-    jobs_dir.mkdir(parents=True, exist_ok=True)
-    (jobs_dir / "{0}.json".format(_safe_name(job["id"]))).write_text(
-        json.dumps(job, indent=2) + "\n", encoding="utf-8"
-    )
+def new_job(user_id: UUID, kind: str, ticket_id: str | None = None) -> dict:
+    job = {
+        "id": str(uuid.uuid4()),
+        "kind": kind,
+        "status": "running",
+        "ticket_id": ticket_id,
+        "run_id": None,
+        "error": None,
+    }
+    _jobs[user_id] = job
     return job
 
 
-def load_job(job_id: str, jobs_dir: Path = JOBS_DIR) -> dict | None:
-    path = jobs_dir / "{0}.json".format(_safe_name(job_id))
-    if not path.is_file():
+def load_job(user_id: UUID, job_id: str) -> dict | None:
+    job = _jobs.get(user_id)
+    if job is None or job["id"] != job_id:
         return None
-    return json.loads(path.read_text(encoding="utf-8"))
+    return dict(job)
 
 
-def new_job(kind: str, ticket_id: str | None = None, jobs_dir: Path = JOBS_DIR) -> dict:
-    return save_job(
-        {
-            "id": str(uuid.uuid4()),
-            "kind": kind,
-            "status": "running",
-            "ticket_id": ticket_id,
-            "ticket": None,
-            "tickets": None,
-            "run_id": None,
-            "error": None,
-        },
-        jobs_dir,
+def read_run_log(user_id: UUID, ticket_id: str, run_id: str) -> str | None:
+    run = intakes.get_run(user_id, ticket_id, run_id)
+    if run is None:
+        return None
+    return "# {0} {1}\n\n- verdict: {2}\n- run: {3}\n\n## Prompt\n{4}\n\n## Result\n{5}\n".format(
+        ticket_id, run["kind"], run["verdict"] or "none", run["run_id"], run["prompt"], run["result"]
     )
 
 
-def read_run_log(ticket_id: str, run_id: str, runs_dir: Path = RUNS_DIR) -> str | None:
-    path = runs_dir / "{0}-{1}.md".format(_safe_name(ticket_id), _safe_name(run_id))
-    if not path.is_file():
-        return None
-    return path.read_text(encoding="utf-8")
-
-
-def write_run_log(ticket_id: str, kind: str, verdict: str | None, prompt: str, result_text: str | None, run_id: str | None = None, runs_dir: Path = RUNS_DIR) -> Path:
-    runs_dir.mkdir(parents=True, exist_ok=True)
-    path = runs_dir / "{0}-{1}.md".format(_safe_name(ticket_id), _safe_name(run_id or kind))
-    path.write_text(
-        "# {0} {1}\n\n- verdict: {2}\n- run: {3}\n\n## Prompt\n{4}\n\n## Result\n{5}\n".format(
-            ticket_id, kind, verdict or "none", run_id or "", prompt, result_text or ""
-        ),
-        encoding="utf-8",
-    )
-    return path
-
-
-def run_step(ticket_id: str, want: str, kind: str, make_prompt, next_status: dict[str, str], fallback: str = "no verdict") -> None:
-    ticket = require_ticket(ticket_id)
+def run_step(user_id: UUID, ticket_id: str, want: str, kind: str, make_prompt, next_status: dict[str, str], fallback: str = "no verdict") -> None:
+    ticket = require_ticket(user_id, ticket_id)
     if ticket["status"] != want:
         print("{0}\tskipped\t{1}".format(ticket_id, ticket["status"]))
         return
@@ -557,10 +396,10 @@ def run_step(ticket_id: str, want: str, kind: str, make_prompt, next_status: dic
     if result.result:
         print(result.result)
     verdict = last_verdict(result.result)
-    write_run_log(ticket_id, kind, verdict, prompt, result.result, result.id)
+    intakes.add_run(user_id, ticket_id, result.id or kind, kind, verdict, prompt, result.result)
     status = next_status.get(verdict)
     if status:
-        set_ticket_status(ticket_id, status, result.id)
+        intakes.set_ticket_status(user_id, ticket_id, status)
         if verdict == FAILED:
             print("{0}\t{1}\t{2}".format(ticket_id, status, FAILED))
         else:

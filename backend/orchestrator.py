@@ -1,4 +1,6 @@
-"""Parse, then solve, then verify, then archive solved tickets."""
+"""Parse, then solve, then verify the user's tickets."""
+
+from uuid import UUID
 
 import config
 import parser
@@ -7,12 +9,7 @@ import verifier
 
 
 @config.locked
-def execute() -> None:
-    parser.get_tickets()
-    solver.solve_tickets()
-    verifier.verify_tickets()
-    config.archive_solved()
-
-
-if __name__ == "__main__":
-    execute()
+def execute(user_id: UUID, session_id: UUID | None = None) -> None:
+    parser.get_tickets(user_id, session_id)
+    solver.solve_tickets(user_id)
+    verifier.verify_tickets(user_id)

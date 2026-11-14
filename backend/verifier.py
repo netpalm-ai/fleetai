@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+from uuid import UUID
 
-from config import FAILED, FIXED, UNRESOLVED, VERIFYING, load_tickets, locked, run_step, tech_ticket
+import intakes
+from config import FAILED, FIXED, UNRESOLVED, VERIFYING, locked, run_step, tech_ticket
 
 
 def verify_prompt(ticket: dict, context: str) -> str:
@@ -28,16 +30,16 @@ TICKET
 
 
 @locked
-def verify(ticket_id: str) -> None:
-    run_step(ticket_id, VERIFYING, "verify", verify_prompt, {FIXED: FIXED, FAILED: UNRESOLVED})
+def verify(user_id: UUID, ticket_id: str) -> None:
+    run_step(user_id, ticket_id, VERIFYING, "verify", verify_prompt, {FIXED: FIXED, FAILED: UNRESOLVED})
 
 
 @locked
-def verify_tickets() -> None:
-    tickets = [item for item in load_tickets() if item["status"] == VERIFYING]
+def verify_tickets(user_id: UUID) -> None:
+    tickets = [item for item in intakes.open_tickets(user_id) if item["status"] == VERIFYING]
     if not tickets:
         print("no verifying tickets")
         return
     for ticket in tickets:
         print("verifying {0}".format(ticket["id"]), flush=True)
-        verify(ticket["id"])
+        verify(user_id, ticket["id"])

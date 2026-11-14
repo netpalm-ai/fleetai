@@ -48,15 +48,16 @@ def client_ip(value: str | None) -> str | None:
     return value
 
 
-def start_cleanup() -> threading.Event:
+def start_cleanup(*extra_tasks) -> threading.Event:
     stop = threading.Event()
 
     def loop() -> None:
         while True:
-            try:
-                cleanup()
-            except Exception:
-                pass
+            for task in (cleanup, *extra_tasks):
+                try:
+                    task()
+                except Exception:
+                    pass
             if stop.wait(3600):
                 return
 

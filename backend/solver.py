@@ -3,23 +3,19 @@
 from __future__ import annotations
 
 import json
+from uuid import UUID
 
+import intakes
 from config import (
     BLOCKED,
     COMPLETED,
     READY,
-    SOLVED_DIR,
-    TICKETS_PATH,
     UNRESOLVED,
     VERIFYING,
-    archive_solved,
-    load_tickets,
     locked,
     require_ticket,
     run_step,
-    set_ticket_status,
     tech_ticket,
-    ticket_where,
 )
 
 
@@ -40,36 +36,27 @@ TICKET
 """.strip().format(ticket=json.dumps(tech_ticket(ticket), indent=2), context=context)
 
 
-def list_tickets() -> None:
-    tickets = load_tickets()
-    if not tickets:
-        print("no tickets")
-        return
-    for ticket in tickets:
-        print("{0}\t{1}\t{2}\t{3}".format(ticket["id"], ticket["status"], ticket_where(ticket), ticket["title"]))
-
-
 @locked
-def complete(ticket_id: str, path=TICKETS_PATH, solved_dir=SOLVED_DIR) -> None:
-    ticket = require_ticket(ticket_id, path)
+def complete(user_id: UUID, ticket_id: str) -> dict:
+    ticket = require_ticket(user_id, ticket_id)
     if ticket["status"] != VERIFYING:
         raise SystemExit("ticket {0} is {1}; complete only accepts verifying".format(ticket_id, ticket["status"]))
-    set_ticket_status(ticket_id, COMPLETED, path=path)
+    intakes.set_ticket_status(user_id, ticket_id, COMPLETED)
     print("{0}\t{1}".format(ticket_id, COMPLETED))
-    archive_solved(path, solved_dir)
+    return {**ticket, "status": COMPLETED}
 
 
 @locked
-def solve(ticket_id: str) -> None:
-    run_step(ticket_id, UNRESOLVED, "solve", ticket_prompt, {READY: VERIFYING}, BLOCKED)
+def solve(user_id: UUID, ticket_id: str) -> None:
+    run_step(user_id, ticket_id, UNRESOLVED, "solve", ticket_prompt, {READY: VERIFYING}, BLOCKED)
 
 
 @locked
-def solve_tickets() -> None:
-    tickets = [item for item in load_tickets() if item["status"] == UNRESOLVED]
+def solve_tickets(user_id: UUID) -> None:
+    tickets = [item for item in intakes.open_tickets(user_id) if item["status"] == UNRESOLVED]
     if not tickets:
         print("no unresolved tickets")
         return
     for ticket in tickets:
         print("solving {0}".format(ticket["id"]), flush=True)
-        solve(ticket["id"])
+        solve(user_id, ticket["id"])

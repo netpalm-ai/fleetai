@@ -59,6 +59,7 @@ erDiagram
     uuid user_id PK_FK
     text product_id PK_FK
     uuid tier_id FK
+    int ticket_retention_days
   }
 ```
 
@@ -74,7 +75,7 @@ Runtime entitlements: join `user_subscriptions` → `product_tiers` → `tier_en
 
 ## Intakes and tickets
 
-Each upload is a row in `intakes`. Parsed defects are `tickets`. A new upload of the same `type` for that user inserts a row and sets the previous row `status = deactivated`. Bytes live on disk under `tickets/intakes/<uuid>`; Postgres stores metadata and sha256.
+Each upload is a row in `intakes`. Parsed defects are `tickets`. A new upload of the same `type` for that user inserts a row and sets the previous row `status = deactivated`. The bytes are stored in `intakes.content` with their sha256. Nothing is written to disk.
 
 ```mermaid
 erDiagram
@@ -83,6 +84,7 @@ erDiagram
   sessions ||--o{ intakes : "audit"
   sessions ||--o{ tickets : "audit"
   intakes ||--o{ tickets : "source list"
+  tickets ||--o{ ticket_runs : "solve/verify log"
 
   intakes {
     uuid id PK
@@ -91,6 +93,7 @@ erDiagram
     text type
     text format
     text status
+    bytea content
   }
 
   tickets {
@@ -100,10 +103,27 @@ erDiagram
     uuid session_id FK
     uuid intake_id FK
     text status
+    timestamptz handled_at
+  }
+
+  ticket_runs {
+    uuid id PK
+    uuid ticket_id FK
+    text run_id
+    text kind
+    text verdict
+    text prompt
+    text result
   }
 ```
 
 `intakes.type` is `email_desc`, `ticket_list`, or `project_context`. `intakes.format` is `txt`, `pdf`, or `md`. Paste vs PDF is the same type with a different format. `intakes.status` is `active` or `deactivated`. `tickets.status` stays `unresolved`, `verifying`, `completed`, or `fixed`. `tickets.public_id` is the parser id. `session_id` is audit only; ownership is `user_id`.
+
+`ticket_runs.kind` is `solve` or `verify`. Deleting a ticket deletes its runs.
+
+## Retention
+
+`tickets.handled_at` is set when a ticket becomes `fixed` or `completed` and stays null while it is open. Open tickets are never deleted. A handled ticket is deleted by tier: `free` immediately, `trial` after 7 days, `paid` after `user_subscriptions.ticket_retention_days` days (default 90, NULL keeps it permanently; the API accepts 7, 30, or 90). Only a `paid` user can change that value, from the Settings page. A deactivated intake that no ticket references is deleted in the same purge.
 
 ## Example shape (FleetAI)
 

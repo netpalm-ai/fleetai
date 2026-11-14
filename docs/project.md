@@ -11,26 +11,22 @@ When the adapter does not name a repo, owner, test, or layer, the solver
 inspects the product root before it edits. It does not deploy.
 
 Parse reads a source email and/or a bug-report PDF, optionally a third
-PDF of extra evidence, and writes `tickets/unsolved_tickets.json`. A long
-extra document is summarized locally before the ticket model sees it. Each
-unresolved ticket can then go to a Cursor agent that edits the product
-checkout.
+PDF of extra evidence, and stores the tickets in Postgres for the signed-in
+user. Nothing is written to disk. A long extra document is summarized locally
+before the ticket model sees it. Each unresolved ticket can then go to a
+Cursor agent that edits the product checkout.
 
 ## Inputs
 
-All three live in `tickets/`. Parse needs the email or the bug report.
-Either one is enough. The extra document is optional, and a missing one is
-normal.
+All three are `intakes` rows, with the bytes in Postgres. Parse needs the
+email or the bug report. Either one is enough. The extra document is
+optional, and a missing one is normal.
 
-| File | Role |
+| `intakes.type` | Role |
 |---|---|
-| `email.desc.txt` | Defect facts. When the bug report is also present, process asks in the email are ignored. |
-| `list.txt` or `list.pdf` | Ticket list. Paste becomes `list.txt`. A PDF upload becomes `list.pdf`. Text is preferred when both exist. PDF text is extracted with PyMuPDF. A page that is only an image contributes no text. |
-| `additional_context.md` or `additional_context.pdf` | Optional evidence. Markdown from the UI is `additional_context.md`. It may fill `context` and `expected` for a defect the email or the bug report already names. It may also show that a listed item is not a software defect, in which case that item is omitted. It cannot create a ticket by itself. |
-
-`tickets/resolved/<build>/` is a place to park a previous email, PDF, and
-parsed list by hand before replacing the working files. The runner does not
-read that folder.
+| `email_desc` | Defect facts. When the bug report is also present, process asks in the email are ignored. |
+| `ticket_list` | Ticket list. Paste is format `txt`. A PDF upload is format `pdf`. Text is preferred when both exist. PDF text is extracted with PyMuPDF. A page that is only an image contributes no text. |
+| `project_context` | Optional evidence. Markdown from the UI is format `md`. It may fill `context` and `expected` for a defect the email or the bug report already names. It may also show that a listed item is not a software defect, in which case that item is omitted. It cannot create a ticket by itself. |
 
 ## Models
 
@@ -53,9 +49,9 @@ outcome. It drops the review method, questions, passed checks, and plans
 for a later round. An empty reply is an error. Ollama must be running for that path at `OLLAMA_HOST`.
 
 Bedrock receives the email, the bug report, the additional context or its
-summary, the Repositories section of the code map, and the ids already in
-`tickets/solved/`. It returns a JSON array. The parser sets workflow status
-itself. The model does not.
+summary, the Repositories section of the code map, and the user's handled
+tickets that are still stored. It returns a JSON array. The parser sets
+workflow status itself. The model does not.
 
 ## Commands
 
@@ -63,20 +59,12 @@ itself. The model does not.
 conda activate dev
 cd /Users/minh/repos/netpalm.ai/fleetai/backend
 
-python main.py parse              # email and/or PDF -> tickets/unsolved_tickets.json
-python main.py                    # list tickets and their state
-python main.py execute           # parse, solve, verify, archive solved
-python orchestrator.py            # same pipeline
-python main.py JMD-30SEP-05       # solve one unresolved ticket
-python main.py verify             # verify every verifying ticket
-python main.py verify JMD-30SEP-05
-python main.py complete JMD-30SEP-05
 uvicorn api:app
 ```
 
-The API is the same workflow as the CLI. `GET /health` returns the runner version when `engineering.md` and `code-context.md` are present. `POST /tickets/inputs` writes the email, ticket list (text or PDF), and optional markdown context. `POST /tickets/{id}/solve`, `POST /tickets/{id}/verify`, and `POST /execute` return `202` and a job id. Poll `GET /jobs/{id}` until `done` or `error`. `GET /tickets/{id}` reads the working list, then the solved archive. `GET /tickets/{id}/runs/{run_id}` reads the solve or verify log. `POST /tickets/{id}/complete` stays synchronous and returns the archived ticket. Parse, solve, verify, complete, execute, and intake take one exclusive lock so two writers cannot share `unsolved_tickets.json`. A second writer gets `409 workflow busy`.
+The workflow is API only. `GET /health` returns the runner version when `engineering.md` and `code-context.md` are present. `POST /tickets/inputs` stores the email, ticket list (text or PDF), and optional markdown context. `POST /tickets/{id}/solve`, `POST /tickets/{id}/verify`, and `POST /execute` return `202` and a job id. Poll `GET /jobs/{id}` until `done` or `error`. Jobs are held in memory per user and are lost on restart. `GET /tickets/{id}` reads the user's ticket. `GET /tickets/{id}/runs/{run_id}` reads the solve or verify log. `POST /tickets/{id}/complete` stays synchronous and returns the completed ticket. `GET /settings` and `PUT /settings` read and change ticket retention. Parse, solve, verify, complete, execute, and intake take one exclusive lock per user. A second writer for the same user gets `409 workflow busy`. Different users do not block each other.
 
-`python main.py parse` does not solve or verify. It needs AWS credentials
+Parse does not solve or verify. It needs AWS credentials
 and a region. It needs Ollama only when the additional context is longer
 than the cap.
 
@@ -87,20 +75,32 @@ writes new tickets as `unresolved`. A new parse drops a previous
 `unresolved` ticket that it does not return. It keeps a ticket that is
 `verifying`, `completed`, or `fixed`.
 
-An id already in `tickets/solved/` is skipped unless the model marks it
-`recurrent` and `context` or `expected` differs from the archive. There is
-no keyword list. A restated id, a retest request, or a test that has not
-happened yet is omitted.
+A `fixed` or `completed` ticket that is still stored is skipped unless the
+model marks it `recurrent` and `context` or `expected` differs from the
+stored copy. There is no keyword list. A restated id, a retest request, or a
+test that has not happened yet is omitted.
 
 - `unresolved` — parser default. The solver may run it. A verifier fail returns here.
 - `verifying` — solver returned `VERDICT: ready`.
-- `fixed` — verifier reviewed the change, repaired bugs that change introduced, stripped unnecessary complexity, and returned `VERDICT: fixed`. Then archived.
-- `completed` — `python main.py complete <id>` after live QA, and only from `verifying`. Then archived. This is not `fixed`.
+- `fixed` — verifier reviewed the change, repaired bugs that change introduced, stripped unnecessary complexity, and returned `VERDICT: fixed`. The ticket is now handled.
+- `completed` — `POST /tickets/{id}/complete` after live QA, and only from `verifying`. The ticket is now handled. This is not `fixed`.
 
-`archive_solved` moves `fixed` and `completed` tickets to
-`tickets/solved/<id>.json`. When the working list is then empty, it also
-moves `email.desc.txt`, `list.pdf`, `list.txt`, `additional_context.pdf`, and `additional_context.md` into
-`tickets/solved/`, replacing the copies parked there.
+## Retention
+
+Open tickets are never deleted. A ticket is handled when it becomes `fixed`
+or `completed`; `tickets.handled_at` records when. Its solve and verify logs
+(`ticket_runs`) go with it. The tier in `product_tiers.status` sets how long
+a handled ticket stays:
+
+| Tier | Handled tickets are kept |
+|---|---|
+| `free` | Deleted as soon as they are handled |
+| `trial` | 7 days |
+| `paid` | `user_subscriptions.ticket_retention_days`, default 90. NULL keeps them permanently. The user picks 7, 30, or 90 days, or permanent, on the Settings page |
+
+Purge runs when a ticket is handled, when a paid user changes the setting,
+and hourly in the background. It also deletes deactivated intakes that no
+ticket references.
 
 The parser keeps the software defect only. Solver and verifier see `id`,
 `title`, `severity`, `services`, `context`, and `expected`. Business labels
@@ -110,27 +110,20 @@ Routing is `code-context.md` plus `services`.
 ## Files
 
 - `llm.py` — `ollama`, `bedrock`, and `cursor`
-- `config.py` — paths, ticket states, merge with the solved archive, archive
-- `parser.py` — read the inputs, summarize when needed, ask Bedrock, write the working list
+- `config.py` — ticket states, merge with handled tickets, per-user workflow lock, in-memory jobs, run logs
+- `parser.py` — read the inputs, summarize when needed, ask Bedrock, save the tickets
 - `solver.py` — `solve()` / `solve_tickets()`; `VERDICT: ready` sets `verifying`. `complete()` is live QA
 - `verifier.py` — `verify()` / `verify_tickets()`; `VERDICT: fixed` sets `fixed`, `VERDICT: failed` sets `unresolved`
-- `orchestrator.py` — `execute()`: parse, solve, verify, archive
-- `main.py` — CLI
-- `api.py` — FastAPI: `GET /health`, `GET /tickets`, `POST /tickets/inputs`, `GET /tickets/{id}`, `GET /tickets/{id}/runs/{run_id}`, `GET /jobs/{id}`, `POST /tickets/parse`, `POST /tickets/{id}/solve`, `POST /tickets/{id}/verify`, `POST /tickets/{id}/complete`, `POST /execute`, plus `/auth/register`, `/auth/login`, `/auth/logout`, `/auth/me`
+- `orchestrator.py` — `execute()`: parse, solve, verify
+- `api.py` — FastAPI: `GET /health`, `GET /tickets`, `POST /tickets/inputs`, `GET /tickets/{id}`, `GET /tickets/{id}/runs/{run_id}`, `GET /jobs/{id}`, `GET /settings`, `PUT /settings`, `POST /tickets/parse`, `POST /tickets/{id}/solve`, `POST /tickets/{id}/verify`, `POST /tickets/{id}/complete`, `POST /execute`, plus `/auth/register`, `/auth/login`, `/auth/logout`, `/auth/me`
 - `db.py` — psycopg pool, `backend/migrations/` at startup
-- `intakes.py` — `intakes` and `tickets` rows. `intakes.type` is email_desc, ticket_list, or project_context. A new upload deactivates the previous row of that type for the user. Parsed tickets are upserted by `(user_id, public_id)`.
+- `intakes.py` — `intakes`, `tickets`, and `ticket_runs` rows, and retention. `intakes.type` is email_desc, ticket_list, or project_context. A new upload deactivates the previous row of that type for the user. Parsed tickets are upserted by `(user_id, public_id)`.
 - `auth/` — Argon2id passwords, opaque session cookie `fleetai_session`
 - `pyproject.toml` — package name, version, pinned dependencies
 - `backend/` — API microservice. `frontend/` — web app microservice. Compose runs both.
 - `codebase/code-context.md` — product map. Not the additional-context PDF
-- `tickets/unsolved_tickets.json` — working list. Missing means there are no open tickets
-- `tickets/solved/<id>.json` — archived `fixed` and `completed` tickets
-- `tickets/runs/<ticket-id>-<run-id>.md` — solve/verify log (gitignored)
 - `tests/test_workflow.py` — workflow unit tests. They do not call the models
-
-The working email, both working PDFs, and the same names under
-`tickets/solved/` and `tickets/resolved/` are gitignored. A parked
-`unsolved_tickets.json` under `tickets/resolved/` is not.
+- `tests/test_intakes.py` — Postgres storage and retention tests
 
 ## Environment
 
@@ -159,6 +152,5 @@ CI reads `${{ vars.* }}` and `${{ secrets.* }}`. Ubuntu runs backend pytest and 
 
 ## Docker
 
-`backend` is the runner API, not the customer. Tickets persist at `FLEETAI_TICKETS_DIR`. Product checkouts bind from `FLEETAI_PRODUCT_ROOT`. One uvicorn worker. `postgres` is `postgres:16-alpine` with named volume `pgdata`, published at `127.0.0.1:5432`. Product, tier, and feature entitlements: [erd.md](erd.md). `frontend` is the web app; nginx proxies `/api/v1/` to `backend:8000` and rate-limits `/api/v1/auth/login`. Compose publishes `127.0.0.1:8000` (API) and `127.0.0.1:8080` (UI). Auth is an HttpOnly cookie session. Ticket JSON workflow is unchanged.
-
+`backend` is the runner API, not the customer. Tickets live in Postgres, not on disk. Product checkouts bind from `FLEETAI_PRODUCT_ROOT`. One uvicorn worker. `postgres` is `postgres:16-alpine` with named volume `pgdata`, published at `127.0.0.1:5432`. Product, tier, and feature entitlements: [erd.md](erd.md). `frontend` is the web app; nginx proxies `/api/v1/` to `backend:8000` and rate-limits `/api/v1/auth/login`. Compose publishes `127.0.0.1:8000` (API) and `127.0.0.1:8080` (UI). Auth is an HttpOnly cookie session.
 Ollama on the Docker host is `http://host.docker.internal:11434`. A Mac `node_modules` or venv inside the Linux image will not run.

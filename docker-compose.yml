@@ -48,7 +48,6 @@ services:
       FLEETAI_SUMMARY_MODEL: ${FLEETAI_SUMMARY_MODEL}
       OLLAMA_HOST: http://host.docker.internal:11434
     volumes:
-      - ${FLEETAI_TICKETS_DIR:-./backend/tickets}:/app/tickets
       - ${FLEETAI_PRODUCT_ROOT:?set FLEETAI_PRODUCT_ROOT}:/product
     extra_hosts:
       - "host.docker.internal:host-gateway"

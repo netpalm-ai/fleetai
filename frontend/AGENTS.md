@@ -39,15 +39,21 @@ textarea, optional project.md context, then **Resolve tickets**. That posts
 `/api/v1/tickets/inputs` then `/api/v1/execute`, polls `/api/v1/jobs/{id}`, and
 lists tickets from `GET /api/v1/tickets`. No marketing hero.
 
+`/settings` is the account page. It shows how long handled tickets are kept
+(`GET /api/v1/settings`). Only a paid user can change it, as a number of days
+or keep forever (`PUT /api/v1/settings`).
+
 ## Layout
 
 ```
 src/api/client.ts          prefixes `/api/v1` (not a folder); cookie + CSRF
+src/components/AppHeader.tsx signed-in header: Settings link, Sign out
 src/components/BrandMark.tsx
 src/data/termsOfService.ts mock Terms of Service (only TOS source)
 src/pages/HomePage.tsx     `/` product intro
 src/pages/LoginPage.tsx    `/login` → POST /api/v1/auth/login
 src/pages/SignUpPage.tsx   `/signup` → POST /api/v1/auth/register
+src/pages/SettingsPage.tsx `/settings` → GET/PUT /api/v1/settings
 src/pages/TermsPage.tsx
 src/pages/TicketsPage.tsx
 src/session.tsx            GET /api/v1/auth/me; no localStorage accounts
@@ -60,7 +66,7 @@ to `/api/v1/auth/register`. `/login` posts `{email, password}` to `/api/v1/auth/
 On load, `GET /api/v1/auth/me`. Non-GET fetches send `X-Requested-With: fleetai` and
 `credentials: 'same-origin'`. 401 on `/tickets` redirects to `/login`. Do not store
 passwords or accounts in localStorage. Routes: `/` intro, `/login`, `/signup`,
-`/terms`, `/tickets`.
+`/terms`, `/tickets`, `/settings`.
 
 ## Backend
 
