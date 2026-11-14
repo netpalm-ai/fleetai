@@ -10,6 +10,8 @@ import uuid
 from contextlib import contextmanager
 from pathlib import Path
 
+import pymupdf
+
 ROOT = Path(__file__).resolve().parent
 
 
@@ -43,8 +45,12 @@ def require_env_int(name: str) -> int:
 
 TICKETS_DIR = ROOT / "tickets"
 PDF_PATH = TICKETS_DIR / "list.pdf"
+LIST_TEXT_PATH = TICKETS_DIR / "list.txt"
 EMAIL_PATH = TICKETS_DIR / "email.desc.txt"
 ADDITIONAL_CONTEXT_PATH = TICKETS_DIR / "additional_context.pdf"
+CONTEXT_MD_PATH = TICKETS_DIR / "additional_context.md"
+INTAKE_PDF_MAX = 50 * 1024 * 1024
+INTAKE_TEXT_MAX = 512 * 1024
 TICKETS_PATH = TICKETS_DIR / "unsolved_tickets.json"
 SOLVED_DIR = TICKETS_DIR / "solved"
 RUNS_DIR = TICKETS_DIR / "runs"
@@ -60,6 +66,107 @@ _in_use = threading.Event()
 
 class WorkflowBusy(RuntimeError):
     pass
+
+
+def _unlink(path: Path) -> None:
+    if path.is_file():
+        path.unlink()
+
+
+_PDF_REJECT = ("/JavaScript", "/EmbeddedFiles", "/Launch", "/RichMedia")
+
+
+def _require_pdf(pdf: bytes) -> None:
+    if len(pdf) > INTAKE_PDF_MAX:
+        raise RuntimeError("ticket list PDF is too large")
+    if not pdf.startswith(b"%PDF"):
+        raise RuntimeError("ticket list PDF is invalid")
+    try:
+        document = pymupdf.open(stream=pdf, filetype="pdf")
+    except Exception as exc:
+        raise RuntimeError("ticket list PDF is invalid") from exc
+    try:
+        if document.is_encrypted or document.needs_pass:
+            raise RuntimeError("ticket list PDF is encrypted")
+        if document.page_count < 1:
+            raise RuntimeError("ticket list PDF is invalid")
+        for xref in range(1, document.xref_length()):
+            try:
+                obj = document.xref_object(xref)
+            except Exception:
+                continue
+            if any(token in obj for token in _PDF_REJECT):
+                raise RuntimeError("ticket list PDF is invalid")
+    finally:
+        document.close()
+
+
+def _record_file(user_id, session_id, intake_type: str, fmt: str, data: bytes, suffix: str) -> None:
+    if user_id is None:
+        return
+    import intakes
+
+    intakes.put(user_id, session_id, intake_type, fmt, data, suffix)
+
+
+def _deactivate_file(user_id, intake_type: str) -> None:
+    if user_id is None:
+        return
+    import intakes
+
+    intakes.deactivate(user_id, intake_type)
+
+
+def save_intake(
+    email: str,
+    list_text: str,
+    context: str,
+    pdf: bytes | None,
+    user_id=None,
+    session_id=None,
+) -> None:
+    email = (email or "").strip()
+    list_text = (list_text or "").strip()
+    context = (context or "").strip()
+    if "\x00" in email or "\x00" in list_text or "\x00" in context:
+        raise RuntimeError("intake text is invalid")
+    if pdf is not None:
+        _require_pdf(pdf)
+    if len(email) > INTAKE_TEXT_MAX or len(list_text) > INTAKE_TEXT_MAX or len(context) > INTAKE_TEXT_MAX:
+        raise RuntimeError("intake text is too large")
+    if not email and not list_text and not pdf:
+        raise RuntimeError("need an email or a ticket list")
+    with workflow_lock(blocking=False):
+        TICKETS_DIR.mkdir(parents=True, exist_ok=True)
+        if email:
+            body = email + "\n"
+            EMAIL_PATH.write_text(body, encoding="utf-8")
+            _record_file(user_id, session_id, "email_desc", "txt", body.encode("utf-8"), ".txt")
+        else:
+            _unlink(EMAIL_PATH)
+            _deactivate_file(user_id, "email_desc")
+        if pdf is not None:
+            PDF_PATH.write_bytes(pdf)
+            _unlink(LIST_TEXT_PATH)
+            _record_file(user_id, session_id, "ticket_list", "pdf", pdf, ".pdf")
+        elif list_text:
+            body = list_text + "\n"
+            LIST_TEXT_PATH.write_text(body, encoding="utf-8")
+            _unlink(PDF_PATH)
+            _record_file(user_id, session_id, "ticket_list", "txt", body.encode("utf-8"), ".txt")
+        else:
+            _unlink(LIST_TEXT_PATH)
+            _unlink(PDF_PATH)
+            _deactivate_file(user_id, "ticket_list")
+        if context:
+            body = context + "\n"
+            CONTEXT_MD_PATH.write_text(body, encoding="utf-8")
+            _unlink(ADDITIONAL_CONTEXT_PATH)
+            _record_file(user_id, session_id, "project_context", "md", body.encode("utf-8"), ".md")
+        else:
+            _unlink(CONTEXT_MD_PATH)
+            _unlink(ADDITIONAL_CONTEXT_PATH)
+            _deactivate_file(user_id, "project_context")
 
 
 def workflow_busy() -> bool:
@@ -375,7 +482,13 @@ def archive_solved(path: Path = TICKETS_PATH, solved_dir: Path = SOLVED_DIR, sou
     save_tickets(keep, path)
     if not keep:
         if sources is None:
-            sources = (EMAIL_PATH, PDF_PATH, ADDITIONAL_CONTEXT_PATH) if path.resolve() == TICKETS_PATH.resolve() else ()
+            sources = (
+                EMAIL_PATH,
+                PDF_PATH,
+                LIST_TEXT_PATH,
+                ADDITIONAL_CONTEXT_PATH,
+                CONTEXT_MD_PATH,
+            ) if path.resolve() == TICKETS_PATH.resolve() else ()
         for src in sources:
             if src.is_file():
                 src.replace(solved_dir / src.name)

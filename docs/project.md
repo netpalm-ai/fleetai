@@ -25,8 +25,8 @@ normal.
 | File | Role |
 |---|---|
 | `email.desc.txt` | Defect facts. When the bug report is also present, process asks in the email are ignored. |
-| `list.pdf` | Bug report. Text is extracted with PyMuPDF. A page that is only an image contributes no text. |
-| `additional_context.pdf` | Optional evidence. It may fill `context` and `expected` for a defect the email or the bug report already names. It may also show that a listed item is not a software defect, in which case that item is omitted. It cannot create a ticket by itself. |
+| `list.txt` or `list.pdf` | Ticket list. Paste becomes `list.txt`. A PDF upload becomes `list.pdf`. Text is preferred when both exist. PDF text is extracted with PyMuPDF. A page that is only an image contributes no text. |
+| `additional_context.md` or `additional_context.pdf` | Optional evidence. Markdown from the UI is `additional_context.md`. It may fill `context` and `expected` for a defect the email or the bug report already names. It may also show that a listed item is not a software defect, in which case that item is omitted. It cannot create a ticket by itself. |
 
 `tickets/resolved/<build>/` is a place to park a previous email, PDF, and
 parsed list by hand before replacing the working files. The runner does not
@@ -74,7 +74,7 @@ python main.py complete JMD-30SEP-05
 uvicorn api:app
 ```
 
-The API is the same workflow as the CLI. `GET /health` returns the runner version when `engineering.md` and `code-context.md` are present. `POST /tickets/{id}/solve`, `POST /tickets/{id}/verify`, and `POST /execute` return `202` and a job id. Poll `GET /jobs/{id}` until `done` or `error`. `GET /tickets/{id}` reads the working list, then the solved archive. `GET /tickets/{id}/runs/{run_id}` reads the solve or verify log. `POST /tickets/{id}/complete` stays synchronous and returns the archived ticket. Parse, solve, verify, complete, and execute take one exclusive lock so two writers cannot share `unsolved_tickets.json`. A second writer gets `409 workflow busy`.
+The API is the same workflow as the CLI. `GET /health` returns the runner version when `engineering.md` and `code-context.md` are present. `POST /tickets/inputs` writes the email, ticket list (text or PDF), and optional markdown context. `POST /tickets/{id}/solve`, `POST /tickets/{id}/verify`, and `POST /execute` return `202` and a job id. Poll `GET /jobs/{id}` until `done` or `error`. `GET /tickets/{id}` reads the working list, then the solved archive. `GET /tickets/{id}/runs/{run_id}` reads the solve or verify log. `POST /tickets/{id}/complete` stays synchronous and returns the archived ticket. Parse, solve, verify, complete, execute, and intake take one exclusive lock so two writers cannot share `unsolved_tickets.json`. A second writer gets `409 workflow busy`.
 
 `python main.py parse` does not solve or verify. It needs AWS credentials
 and a region. It needs Ollama only when the additional context is longer
@@ -99,7 +99,7 @@ happened yet is omitted.
 
 `archive_solved` moves `fixed` and `completed` tickets to
 `tickets/solved/<id>.json`. When the working list is then empty, it also
-moves `email.desc.txt`, `list.pdf`, and `additional_context.pdf` into
+moves `email.desc.txt`, `list.pdf`, `list.txt`, `additional_context.pdf`, and `additional_context.md` into
 `tickets/solved/`, replacing the copies parked there.
 
 The parser keeps the software defect only. Solver and verifier see `id`,
@@ -116,8 +116,9 @@ Routing is `code-context.md` plus `services`.
 - `verifier.py` — `verify()` / `verify_tickets()`; `VERDICT: fixed` sets `fixed`, `VERDICT: failed` sets `unresolved`
 - `orchestrator.py` — `execute()`: parse, solve, verify, archive
 - `main.py` — CLI
-- `api.py` — FastAPI: `GET /health`, `GET /tickets`, `GET /tickets/{id}`, `GET /tickets/{id}/runs/{run_id}`, `GET /jobs/{id}`, `POST /tickets/parse`, `POST /tickets/{id}/solve`, `POST /tickets/{id}/verify`, `POST /tickets/{id}/complete`, `POST /execute`, plus `/auth/register`, `/auth/login`, `/auth/logout`, `/auth/me`
+- `api.py` — FastAPI: `GET /health`, `GET /tickets`, `POST /tickets/inputs`, `GET /tickets/{id}`, `GET /tickets/{id}/runs/{run_id}`, `GET /jobs/{id}`, `POST /tickets/parse`, `POST /tickets/{id}/solve`, `POST /tickets/{id}/verify`, `POST /tickets/{id}/complete`, `POST /execute`, plus `/auth/register`, `/auth/login`, `/auth/logout`, `/auth/me`
 - `db.py` — psycopg pool, `backend/migrations/` at startup
+- `intakes.py` — `intakes` and `tickets` rows. `intakes.type` is email_desc, ticket_list, or project_context. A new upload deactivates the previous row of that type for the user. Parsed tickets are upserted by `(user_id, public_id)`.
 - `auth/` — Argon2id passwords, opaque session cookie `fleetai_session`
 - `pyproject.toml` — package name, version, pinned dependencies
 - `backend/` — API microservice. `frontend/` — web app microservice. Compose runs both.

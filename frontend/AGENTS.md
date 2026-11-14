@@ -34,8 +34,10 @@ only. No image logo.
 Terms (`/terms`) is a readable legal page with the site header, not a landing
 hero. Copy comes only from `src/data/termsOfService.ts`.
 
-After sign-in, `/tickets` is a list of tickets from `GET /api/v1/tickets`. No
-marketing hero.
+After sign-in, `/tickets` is the intake studio: paste or PDF ticket list, email
+textarea, optional project.md context, then **Resolve tickets**. That posts
+`/api/v1/tickets/inputs` then `/api/v1/execute`, polls `/api/v1/jobs/{id}`, and
+lists tickets from `GET /api/v1/tickets`. No marketing hero.
 
 ## Layout
 

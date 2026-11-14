@@ -22,7 +22,7 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
   if (method !== "GET" && method !== "HEAD" && !headers.has("X-Requested-With")) {
     headers.set("X-Requested-With", "fleetai");
   }
-  if (init.body != null && !headers.has("Content-Type")) {
+  if (init.body != null && !(init.body instanceof FormData) && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
   const href = url(path);

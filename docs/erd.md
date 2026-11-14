@@ -72,6 +72,39 @@ erDiagram
 
 Runtime entitlements: join `user_subscriptions` → `product_tiers` → `tier_entitlements`. Do not copy a feature list onto the user.
 
+## Intakes and tickets
+
+Each upload is a row in `intakes`. Parsed defects are `tickets`. A new upload of the same `type` for that user inserts a row and sets the previous row `status = deactivated`. Bytes live on disk under `tickets/intakes/<uuid>`; Postgres stores metadata and sha256.
+
+```mermaid
+erDiagram
+  users ||--o{ intakes : uploads
+  users ||--o{ tickets : owns
+  sessions ||--o{ intakes : "audit"
+  sessions ||--o{ tickets : "audit"
+  intakes ||--o{ tickets : "source list"
+
+  intakes {
+    uuid id PK
+    uuid user_id FK
+    uuid session_id FK
+    text type
+    text format
+    text status
+  }
+
+  tickets {
+    uuid id PK
+    text public_id
+    uuid user_id FK
+    uuid session_id FK
+    uuid intake_id FK
+    text status
+  }
+```
+
+`intakes.type` is `email_desc`, `ticket_list`, or `project_context`. `intakes.format` is `txt`, `pdf`, or `md`. Paste vs PDF is the same type with a different format. `intakes.status` is `active` or `deactivated`. `tickets.status` stays `unresolved`, `verifying`, `completed`, or `fixed`. `tickets.public_id` is the parser id. `session_id` is audit only; ownership is `user_id`.
+
 ## Example shape (FleetAI)
 
 | product | tier | entitled features |

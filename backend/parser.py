@@ -8,7 +8,9 @@ import pymupdf
 
 from config import (
     ADDITIONAL_CONTEXT_PATH,
+    CONTEXT_MD_PATH,
     EMAIL_PATH,
+    LIST_TEXT_PATH,
     PDF_PATH,
     TICKETS_PATH,
     apply_workflow,
@@ -81,10 +83,14 @@ def _pdf_text(path) -> str:
 
 
 def report_text() -> str:
+    if LIST_TEXT_PATH.is_file():
+        return LIST_TEXT_PATH.read_text(encoding="utf-8").strip()
     return _pdf_text(PDF_PATH)
 
 
 def additional_context_text() -> str:
+    if CONTEXT_MD_PATH.is_file():
+        return CONTEXT_MD_PATH.read_text(encoding="utf-8").strip()
     return _pdf_text(ADDITIONAL_CONTEXT_PATH)
 
 
@@ -93,7 +99,7 @@ def get_tickets() -> list[dict]:
     email = email_text()
     report = report_text()
     if not email and not report:
-        raise RuntimeError("need tickets/email.desc.txt or tickets/list.pdf")
+        raise RuntimeError("need an email or a ticket list")
     raw_additional = additional_context_text()
     additional = ollama.summarize(raw_additional)
     if raw_additional and len(additional) != len(raw_additional):

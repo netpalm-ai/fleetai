@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import base64
 import threading
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from unittest.mock import patch
+from unittest.mock import ANY, patch
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
@@ -36,10 +37,18 @@ class ApiTests(unittest.TestCase):
         config.JOBS_DIR = self.jobs
         config.LOCK_PATH = self.jobs / ".lock"
         api.app.dependency_overrides[get_current_user] = _user
+        self.file_patches = [
+            patch.object(api.intakes, "list_open_tickets", return_value=None),
+            patch.object(api.intakes, "sync_tickets"),
+        ]
+        for item in self.file_patches:
+            item.start()
         self.client = TestClient(api.app)
 
     def tearDown(self) -> None:
         api.app.dependency_overrides.clear()
+        for item in self.file_patches:
+            item.stop()
         config.JOBS_DIR = self.prior
         config.LOCK_PATH = self.prior_lock
         self.tmp.cleanup()
@@ -167,6 +176,7 @@ class ApiTests(unittest.TestCase):
             self.assertEqual(self.client.get("/tickets/T1/runs/run-1").status_code, 401)
             self.assertEqual(self.client.get("/jobs/missing").status_code, 401)
             self.assertEqual(self.client.post("/tickets/parse").status_code, 401)
+            self.assertEqual(self.client.post("/tickets/inputs").status_code, 401)
             self.assertEqual(self.client.post("/tickets/T1/solve").status_code, 401)
             self.assertEqual(self.client.post("/tickets/T1/verify").status_code, 401)
             self.assertEqual(self.client.post("/tickets/T1/complete").status_code, 401)
@@ -184,7 +194,37 @@ class ApiTests(unittest.TestCase):
         )
         try:
             self.assertEqual(self.client.get("/tickets").status_code, 403)
+            self.assertEqual(self.client.post("/tickets/inputs", json={"email": "hi"}).status_code, 403)
             self.assertEqual(self.client.post("/execute").status_code, 403)
             self.assertEqual(self.client.get("/health").status_code, 200)
         finally:
             api.app.dependency_overrides[get_current_user] = _user
+
+    def test_post_inputs_saves_text(self) -> None:
+        with patch.object(api.config, "save_intake") as save:
+            response = self.client.post(
+                "/tickets/inputs",
+                json={"email": "hello", "list_text": "T1 broken login", "context": "# project"},
+            )
+        self.assertEqual(response.status_code, 204)
+        save.assert_called_once_with("hello", "T1 broken login", "# project", None, ANY, ANY)
+
+    def test_post_inputs_saves_pdf(self) -> None:
+        raw = b"%PDF-1.4 test"
+        with patch.object(api.config, "save_intake") as save:
+            response = self.client.post(
+                "/tickets/inputs",
+                json={"list_pdf_base64": base64.b64encode(raw).decode("ascii")},
+            )
+        self.assertEqual(response.status_code, 204)
+        save.assert_called_once_with("", "", "", raw, ANY, ANY)
+
+    def test_post_inputs_rejects_empty(self) -> None:
+        with patch.object(api.config, "save_intake", side_effect=RuntimeError("need an email or a ticket list")):
+            response = self.client.post("/tickets/inputs", json={})
+        self.assertEqual(response.status_code, 400)
+
+    def test_post_inputs_busy(self) -> None:
+        with patch.object(api.config, "save_intake", side_effect=config.WorkflowBusy("workflow busy")):
+            response = self.client.post("/tickets/inputs", json={"email": "hello"})
+        self.assertEqual(response.status_code, 409)

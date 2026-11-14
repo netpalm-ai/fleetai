@@ -11,6 +11,8 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
+import pymupdf
+
 import config
 import solver
 import verifier
@@ -389,6 +391,77 @@ class RunLogTests(unittest.TestCase):
             self.assertIn("jmd-frontend/src/App.tsx", text)
             self.assertIn("npm run test:run -- parse.test.ts", text)
             self.assertIn("## Result", text)
+
+
+def _minimal_pdf() -> bytes:
+    document = pymupdf.open()
+    document.new_page()
+    data = document.tobytes()
+    document.close()
+    return data
+
+
+def _encrypted_pdf() -> bytes:
+    document = pymupdf.open()
+    document.new_page()
+    data = document.tobytes(encryption=pymupdf.PDF_ENCRYPT_AES_256, user_pw="secret", owner_pw="owner")
+    document.close()
+    return data
+
+
+class SaveIntakeTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = TemporaryDirectory()
+        root = Path(self.tmp.name)
+        self.root = root
+        self.patches = [
+            patch.object(config, "TICKETS_DIR", root),
+            patch.object(config, "EMAIL_PATH", root / "email.desc.txt"),
+            patch.object(config, "PDF_PATH", root / "list.pdf"),
+            patch.object(config, "LIST_TEXT_PATH", root / "list.txt"),
+            patch.object(config, "ADDITIONAL_CONTEXT_PATH", root / "additional_context.pdf"),
+            patch.object(config, "CONTEXT_MD_PATH", root / "additional_context.md"),
+            patch.object(config, "LOCK_PATH", root / ".lock"),
+        ]
+        for item in self.patches:
+            item.start()
+
+    def tearDown(self) -> None:
+        for item in self.patches:
+            item.stop()
+        self.tmp.cleanup()
+
+    def test_writes_text_and_clears_pdf(self) -> None:
+        (self.root / "list.pdf").write_bytes(b"%PDF")
+        config.save_intake("email body", "ticket list", "# project", None)
+        self.assertEqual((self.root / "email.desc.txt").read_text(encoding="utf-8"), "email body\n")
+        self.assertEqual((self.root / "list.txt").read_text(encoding="utf-8"), "ticket list\n")
+        self.assertEqual((self.root / "additional_context.md").read_text(encoding="utf-8"), "# project\n")
+        self.assertFalse((self.root / "list.pdf").exists())
+
+    def test_pdf_clears_list_text(self) -> None:
+        pdf = _minimal_pdf()
+        (self.root / "list.txt").write_text("old\n", encoding="utf-8")
+        config.save_intake("", "", "", pdf)
+        self.assertEqual((self.root / "list.pdf").read_bytes(), pdf)
+        self.assertFalse((self.root / "list.txt").exists())
+        self.assertFalse((self.root / "email.desc.txt").exists())
+
+    def test_rejects_empty(self) -> None:
+        with self.assertRaises(RuntimeError):
+            config.save_intake("", "", "", None)
+
+    def test_rejects_non_pdf(self) -> None:
+        with self.assertRaises(RuntimeError):
+            config.save_intake("", "", "", b"hello")
+
+    def test_rejects_truncated_pdf(self) -> None:
+        with self.assertRaises(RuntimeError):
+            config.save_intake("", "", "", b"%PDF-1.4")
+
+    def test_rejects_encrypted_pdf(self) -> None:
+        with self.assertRaises(RuntimeError):
+            config.save_intake("", "", "", _encrypted_pdf())
 
 
 if __name__ == "__main__":

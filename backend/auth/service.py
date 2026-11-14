@@ -50,6 +50,7 @@ class User:
     features: tuple[str, ...] = ()
     status: str = "active"
     last_signed_in_ts: datetime | None = None
+    session_id: UUID | None = None
 
 
 class AuthError(Exception):
@@ -105,6 +106,7 @@ def user_from_row(row) -> User:
         features=_row_features(row),
         status=str(row.get("status") or "active"),
         last_signed_in_ts=row.get("last_signed_in_ts"),
+        session_id=row.get("session_id"),
     )
 
 
