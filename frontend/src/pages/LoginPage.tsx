@@ -22,7 +22,7 @@ export function LoginPage() {
 
   return (
     <div className="auth">
-      <form className="auth-card" onSubmit={onSubmit}>
+      <form className="auth-card" onSubmit={onSubmit} noValidate>
         <BrandMark large />
         <h1>Sign in</h1>
         <label className="field">
@@ -33,8 +33,6 @@ export function LoginPage() {
             autoComplete="email"
             inputMode="email"
             autoFocus
-            required
-            maxLength={254}
           />
         </label>
         <label className="field">
@@ -43,9 +41,6 @@ export function LoginPage() {
             name="password"
             type="password"
             autoComplete="current-password"
-            minLength={4}
-            maxLength={128}
-            required
           />
         </label>
         {error ? <p className="form-error">{error}</p> : null}

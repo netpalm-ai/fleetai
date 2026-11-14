@@ -69,15 +69,6 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       ready,
       async signIn(rawName: string, password: string) {
         const name = rawName.trim();
-        if (!name || !password) {
-          return "Enter an email and password.";
-        }
-        if (!isEmail(name)) {
-          return "Enter a valid email address.";
-        }
-        if (!password || password.length > MAX_PASSWORD) {
-          return "Enter a password.";
-        }
         try {
           const user = await request<AuthUser>("/auth/login", {
             method: "POST",
@@ -86,7 +77,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           setUsername(user.username);
           return null;
         } catch (err) {
-          return errorMessage(err, "Sign in failed.");
+          if (err instanceof ApiError && (err.status === 401 || err.status === 403 || err.status === 422)) {
+            return "invalid credentials";
+          }
+          return "Sign in failed.";
         }
       },
       async signUp(
