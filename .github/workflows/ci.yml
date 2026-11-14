@@ -135,9 +135,6 @@ jobs:
             --exclude .env \
             --exclude frontend/node_modules/ \
             --exclude frontend/dist/ \
-            --exclude backend/tickets/runs/ \
-            --exclude backend/tickets/jobs/ \
-            --exclude backend/tickets/.lock \
             ./ /home/deploy/fleetai/
           cd /home/deploy/fleetai
           docker compose down --remove-orphans

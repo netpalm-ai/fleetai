@@ -3,16 +3,5 @@ __pycache__/
 .DS_Store
 .env
 backend/.env
-backend/tickets/list.pdf
-backend/tickets/email.desc.txt
-backend/tickets/additional_context.pdf
-backend/tickets/solved/list.pdf
-backend/tickets/solved/email.desc.txt
-backend/tickets/solved/additional_context.pdf
-backend/tickets/resolved/**/list.pdf
-backend/tickets/resolved/**/email.desc.txt
-backend/tickets/runs/
-backend/tickets/jobs/
-backend/tickets/.lock
 frontend/node_modules/
 frontend/dist/

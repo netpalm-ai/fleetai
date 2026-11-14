@@ -5,11 +5,4 @@ __pycache__
 *.pyc
 .DS_Store
 .env
-tickets/list.pdf
-tickets/email.desc.txt
-tickets/additional_context.pdf
-tickets/runs
-tickets/jobs
-tickets/resolved
-tickets/.lock
 docs/AGENT_INSTRUCTION_UPDATE_FLEETAI.md
