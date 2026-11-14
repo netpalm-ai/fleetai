@@ -18,8 +18,8 @@ def session_max_days() -> int:
     return int((os.getenv("SESSION_MAX_DAYS") or "30").strip() or "30")
 
 
-def session_idle_days() -> int:
-    return int((os.getenv("SESSION_IDLE_DAYS") or "7").strip() or "7")
+def session_idle_minutes() -> int:
+    return int((os.getenv("SESSION_IDLE_MIN_LIMIT") or "60").strip() or "60")
 
 
 def cookie_secure() -> bool:

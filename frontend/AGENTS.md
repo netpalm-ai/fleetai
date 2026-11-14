@@ -65,7 +65,10 @@ to `/api/v1/auth/register`. `/login` posts `{email, password}` to `/api/v1/auth/
 `username` is the handle; sign-in uses `email`.
 On load, `GET /api/v1/auth/me`. Non-GET fetches send `X-Requested-With: fleetai` and
 `credentials: 'same-origin'`. 401 on `/tickets` redirects to `/login`. Do not store
-passwords or accounts in localStorage. Routes: `/` intro, `/login`, `/signup`,
+passwords or accounts in localStorage. `SessionProvider` signs the user out after
+`idle_limit_minutes` (from `/auth/me`) without input and shows `SessionExpired`, a
+blurred overlay with a Sign in button. A 401 from a page calls `expire()` to show the
+same dialog. Routes: `/` intro, `/login`, `/signup`,
 `/terms`, `/tickets`, `/settings`.
 
 ## Backend

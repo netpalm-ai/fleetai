@@ -51,7 +51,7 @@ function fileToBase64(file: File): Promise<string> {
 }
 
 export function TicketsPage() {
-  const { username, ready, signOut } = useSession();
+  const { username, ready, expire } = useSession();
   const [email, setEmail] = useState("");
   const [listText, setListText] = useState("");
   const [context, setContext] = useState("");
@@ -69,7 +69,7 @@ export function TicketsPage() {
       .then(setTickets)
       .catch((err: unknown) => {
         if (err instanceof ApiError && err.status === 401) {
-          void signOut();
+          expire();
           return;
         }
         if (err instanceof ApiError && err.status === 403) {
@@ -82,7 +82,7 @@ export function TicketsPage() {
         }
         setError(err instanceof Error ? err.message : "request failed");
       });
-  }, [signOut]);
+  }, [expire]);
 
   useEffect(() => {
     if (username) {
@@ -124,7 +124,7 @@ export function TicketsPage() {
           setBusy(false);
           stopPoll();
           if (err instanceof ApiError && err.status === 401) {
-            void signOut();
+            expire();
             return;
           }
           setError(err instanceof Error ? err.message : "job poll failed");
@@ -193,7 +193,7 @@ export function TicketsPage() {
     } catch (err: unknown) {
       setBusy(false);
       if (err instanceof ApiError && err.status === 401) {
-        void signOut();
+        expire();
         return;
       }
       setError(err instanceof Error ? err.message : "resolve failed");

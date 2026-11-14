@@ -24,7 +24,7 @@ function keepText(days: number | null): string {
 }
 
 export function SettingsPage() {
-  const { username, ready, signOut } = useSession();
+  const { username, ready, expire } = useSession();
   const [settings, setSettings] = useState<Settings | null>(null);
   const [keep, setKeep] = useState("90");
   const [error, setError] = useState<string | null>(null);
@@ -38,12 +38,12 @@ export function SettingsPage() {
   const fail = useCallback(
     (err: unknown) => {
       if (err instanceof ApiError && err.status === 401) {
-        void signOut();
+        expire();
         return;
       }
       setError(err instanceof Error ? err.message : "request failed");
     },
-    [signOut],
+    [expire],
   );
 
   useEffect(() => {

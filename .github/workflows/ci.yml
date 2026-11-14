@@ -89,6 +89,7 @@ jobs:
       FLEETAI_PRODUCT_ROOT: ${{ vars.FLEETAI_PRODUCT_ROOT }}
       POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
       COOKIE_SECURE: "false"
+      SESSION_IDLE_MIN_LIMIT: ${{ vars.SESSION_IDLE_MIN_LIMIT }}
     steps:
       - uses: actions/checkout@v4
       - name: Deploy
@@ -123,6 +124,7 @@ jobs:
       FLEETAI_PRODUCT_ROOT: /home/minh/repos/hba
       OLLAMA_HOST: http://host.docker.internal:11434
       COOKIE_SECURE: "true"
+      SESSION_IDLE_MIN_LIMIT: ${{ vars.SESSION_IDLE_MIN_LIMIT }}
     steps:
       - uses: actions/checkout@v4
       - name: Deploy

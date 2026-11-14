@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import unittest
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
@@ -111,6 +112,7 @@ class AuthTests(unittest.TestCase):
         self.assertEqual(me.json()["last_signed_in_ts"], logged.json()["last_signed_in_ts"])
         self.assertEqual(me.json()["first_name"], "Ada")
         self.assertEqual(me.json()["last_name"], "Lovelace")
+        self.assertEqual(me.json()["idle_limit_minutes"], 60)
         with db.get_pool().connection() as conn:
             row = conn.execute(
                 "SELECT password_hash, email FROM users WHERE email = %s",
@@ -249,7 +251,11 @@ class AuthTests(unittest.TestCase):
             headers=CSRF,
         )
         with db.get_pool().connection() as conn:
-            conn.execute("UPDATE sessions SET last_seen_at = now() - interval '8 days'")
+            conn.execute("UPDATE sessions SET last_seen_at = now() - interval '30 minutes'")
+            conn.commit()
+        self.assertEqual(self.client.get("/auth/me").status_code, 200)
+        with db.get_pool().connection() as conn:
+            conn.execute("UPDATE sessions SET last_seen_at = now() - interval '2 hours'")
             conn.commit()
         self.assertEqual(self.client.get("/auth/me").status_code, 401)
 
@@ -269,6 +275,21 @@ class AuthTests(unittest.TestCase):
         )
         self.assertEqual(disabled_login.status_code, 401)
         self.assertEqual(disabled_login.json()["detail"], "invalid credentials")
+
+    def test_idle_limit_follows_environment(self) -> None:
+        created = self.client.post("/auth/register", json=_reg(EVE), headers=CSRF)
+        self._verify(created.json()["id"])
+        with patch.dict(os.environ, {"SESSION_IDLE_MIN_LIMIT": "10"}):
+            logged = self.client.post(
+                "/auth/login",
+                json={"email": EVE, "password": PASSWORD},
+                headers=CSRF,
+            )
+            self.assertEqual(logged.json()["idle_limit_minutes"], 10)
+            with db.get_pool().connection() as conn:
+                conn.execute("UPDATE sessions SET last_seen_at = now() - interval '15 minutes'")
+                conn.commit()
+            self.assertEqual(self.client.get("/auth/me").status_code, 401)
 
     def test_password_change_revokes_sessions(self) -> None:
         created = self.client.post("/auth/register", json=_reg(ADA), headers=CSRF)

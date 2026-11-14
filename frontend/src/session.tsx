@@ -1,10 +1,13 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { SessionExpired } from "./components/SessionExpired";
 import { ApiError, request } from "./api/client";
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MAX_EMAIL = 254;
 const MIN_PASSWORD = 10;
 const MAX_PASSWORD = 128;
+const PING_MS = 5 * 60_000;
+const ACTIVITY_EVENTS = ["pointerdown", "pointermove", "keydown", "wheel", "touchstart"];
 
 type AuthUser = {
   id: string;
@@ -17,6 +20,7 @@ type AuthUser = {
   subscription_status: string;
   registered_product: string;
   features: string[];
+  idle_limit_minutes: number;
 };
 
 type SessionValue = {
@@ -32,6 +36,7 @@ type SessionValue = {
     tosAccepted: boolean,
   ) => Promise<string | null>;
   signOut: () => Promise<void>;
+  expire: () => void;
 };
 
 const SessionContext = createContext<SessionValue | null>(null);
@@ -62,13 +67,50 @@ function errorMessage(err: unknown, fallback: string): string {
 export function SessionProvider({ children }: { children: ReactNode }) {
   const [username, setUsername] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
+  const [idleMinutes, setIdleMinutes] = useState<number | null>(null);
+  const [expired, setExpired] = useState(false);
 
   useEffect(() => {
     request<AuthUser>("/auth/me")
-      .then((user) => setUsername(user.username))
+      .then((user) => {
+        setUsername(user.username);
+        setIdleMinutes(user.idle_limit_minutes);
+      })
       .catch(() => setUsername(null))
       .finally(() => setReady(true));
   }, []);
+
+  useEffect(() => {
+    if (!username || expired || idleMinutes === null) {
+      return;
+    }
+    let lastPing = Date.now();
+    let timer = window.setTimeout(lapse, idleMinutes * 60_000);
+
+    function lapse() {
+      void request<void>("/auth/logout", { method: "POST" }).catch(() => undefined);
+      setExpired(true);
+    }
+
+    function onActivity() {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(lapse, (idleMinutes ?? 0) * 60_000);
+      if (Date.now() - lastPing >= PING_MS) {
+        lastPing = Date.now();
+        request<AuthUser>("/auth/me").catch((err: unknown) => {
+          if (err instanceof ApiError && err.status === 401) {
+            setExpired(true);
+          }
+        });
+      }
+    }
+
+    ACTIVITY_EVENTS.forEach((name) => window.addEventListener(name, onActivity, { passive: true }));
+    return () => {
+      window.clearTimeout(timer);
+      ACTIVITY_EVENTS.forEach((name) => window.removeEventListener(name, onActivity));
+    };
+  }, [username, expired, idleMinutes]);
 
   const value = useMemo<SessionValue>(
     () => ({
@@ -82,6 +124,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
             body: JSON.stringify({ email: name, password }),
           });
           setUsername(user.username);
+          setIdleMinutes(user.idle_limit_minutes);
+          setExpired(false);
           return null;
         } catch (err) {
           if (err instanceof ApiError && (err.status === 401 || err.status === 403 || err.status === 422)) {
@@ -144,12 +188,28 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           /* still clear the local session */
         }
         setUsername(null);
+        setExpired(false);
+      },
+      expire() {
+        setExpired(true);
       },
     }),
     [username, ready],
   );
 
-  return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
+  return (
+    <SessionContext.Provider value={value}>
+      {children}
+      {username && expired ? (
+        <SessionExpired
+          onSignIn={() => {
+            setUsername(null);
+            setExpired(false);
+          }}
+        />
+      ) : null}
+    </SessionContext.Provider>
+  );
 }
 
 export function useSession(): SessionValue {

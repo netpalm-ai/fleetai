@@ -12,7 +12,7 @@ from auth.service import (
     User,
     user_from_row,
 )
-from auth.sessions import COOKIE_NAME, CSRF_HEADER, CSRF_VALUE, session_idle_days, token_hash, touch_session
+from auth.sessions import COOKIE_NAME, CSRF_HEADER, CSRF_VALUE, session_idle_minutes, token_hash, touch_session
 
 
 def require_csrf(request: Request) -> None:
@@ -34,11 +34,11 @@ def get_current_user(request: Request) -> User:
                 WHERE s.token_hash = %s
                   AND s.revoked_at IS NULL
                   AND s.expires_at > now()
-                  AND s.last_seen_at > now() - (%s * interval '1 day')
+                  AND s.last_seen_at > now() - (%s * interval '1 minute')
                   AND u.status = 'active'
                   AND u.email_verified
                 """,
-                (token_hash(token), session_idle_days()),
+                (token_hash(token), session_idle_minutes()),
             ).fetchone()
     except RuntimeError as exc:
         raise HTTPException(503, str(exc)) from exc

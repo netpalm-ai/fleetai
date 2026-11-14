@@ -134,6 +134,11 @@ Parse:
 - `BEDROCK_MODEL_ID`, `FLEETAI_BEDROCK_MAX_TOKENS`, `FLEETAI_BEDROCK_TIMEOUT`, `FLEETAI_BEDROCK_CONNECT_TIMEOUT`
 - `FLEETAI_SUMMARY_MODEL`, `OLLAMA_HOST`, `FLEETAI_SUMMARY_LIMIT`, `FLEETAI_OLLAMA_TIMEOUT`, `FLEETAI_OLLAMA_MAX_TOKENS`, `FLEETAI_OLLAMA_CONTEXT_WINDOW`
 
+Sessions:
+
+- `SESSION_IDLE_MIN_LIMIT` — minutes of inactivity before a session ends. Default 60. Set it as the GitHub Actions variable of the same name. The server refreshes a session at most every 5 minutes, so keep it at 10 or more. The web app signs the user out after the same time without input, blurs the page, and shows a "Session expired" dialog with a Sign in button. It also shows that dialog when any call returns 401. While the user is active, the page pings `/auth/me` every 5 minutes to keep the session alive.
+- `SESSION_MAX_DAYS` — absolute session lifetime. Default 30.
+
 Solve and verify:
 
 - `CURSOR_API_KEY` — GitHub Actions secret. Not stored in `.env`. GitHub will

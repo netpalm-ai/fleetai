@@ -7,7 +7,7 @@ from pydantic import BaseModel
 
 from auth.deps import get_current_user, require_csrf
 from auth.service import AuthError, User, change_password, login, logout, register, verify_email
-from auth.sessions import COOKIE_NAME, cookie_max_age, cookie_secure
+from auth.sessions import COOKIE_NAME, cookie_max_age, cookie_secure, session_idle_minutes
 
 router = APIRouter()
 
@@ -74,6 +74,7 @@ def _user_json(user: User) -> dict:
         "subscription_status": user.subscription_status,
         "registered_product": user.registered_product,
         "features": list(user.features),
+        "idle_limit_minutes": session_idle_minutes(),
     }
 
 
