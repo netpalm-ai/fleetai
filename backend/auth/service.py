@@ -16,6 +16,7 @@ MAX_EMAIL = 254
 MAX_NAME = 80
 FLEETAI_PRODUCT = "fleetai"
 FLEETAI_TIER_FREE = "free"
+FLEETAI_FEATURE_TICKETS = "tickets"
 _EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 USER_FLEETAI_COLS = """
 u.id, u.username, u.first_name, u.last_name, u.email,
@@ -200,9 +201,7 @@ def register(
                     (row["id"],),
                 ).fetchone()
     except UniqueViolation as exc:
-        if getattr(exc.diag, "constraint_name", None) == "users_username_key":
-            raise AuthError(409, "username taken") from exc
-        raise AuthError(409, "email taken") from exc
+        raise AuthError(409, "account taken") from exc
     if row is None:
         raise AuthError(500, "register failed")
     user = user_from_row(row)
@@ -251,3 +250,25 @@ def login(email: str, password: str, ip: str | None, user_agent: str | None) -> 
 def logout(token: str | None) -> None:
     if token:
         sessions.revoke_token(token)
+
+
+def change_password(user_id: UUID, current: str, new: str) -> None:
+    if not current or not passwords.valid_password(new):
+        raise AuthError(422, "invalid")
+    with db.get_pool().connection() as conn:
+        row = conn.execute(
+            "SELECT password_hash FROM users WHERE id = %s",
+            (user_id,),
+        ).fetchone()
+        if row is None or not passwords.verify_password(row["password_hash"], current):
+            raise AuthError(401, "invalid credentials")
+        conn.execute(
+            """
+            UPDATE users
+            SET password_hash = %s, updated_at = now()
+            WHERE id = %s
+            """,
+            (passwords.hash_password(new), user_id),
+        )
+        conn.commit()
+    sessions.revoke_user_sessions(user_id)

@@ -43,10 +43,7 @@ export function isEmail(value: string): boolean {
 function errorMessage(err: unknown, fallback: string): string {
   if (err instanceof ApiError) {
     if (err.status === 409) {
-      if (err.message === "username taken") {
-        return "That username is already in use.";
-      }
-      return "That email is already in use. Sign in instead.";
+      return "That account already exists.";
     }
     if (err.status === 401) {
       return "invalid credentials";

@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 
 from auth.deps import get_current_user, require_csrf
-from auth.service import AuthError, User, login, logout, register, verify_email
+from auth.service import AuthError, User, change_password, login, logout, register, verify_email
 from auth.sessions import COOKIE_NAME, cookie_max_age, cookie_secure
 
 router = APIRouter()
@@ -28,6 +28,11 @@ class LoginBody(BaseModel):
 
 class VerifyBody(BaseModel):
     token: str
+
+
+class PasswordBody(BaseModel):
+    current_password: str
+    new_password: str
 
 
 def _set_cookie(response: Response, token: str) -> None:
@@ -126,3 +131,19 @@ def post_logout(request: Request, response: Response, _: None = Depends(require_
 @router.get("/me")
 def get_me(user: User = Depends(get_current_user)) -> dict:
     return _user_json(user)
+
+
+@router.post("/password", status_code=204, response_model=None)
+def post_password(
+    body: PasswordBody,
+    response: Response,
+    user: User = Depends(get_current_user),
+    _: None = Depends(require_csrf),
+) -> None:
+    try:
+        change_password(user.id, body.current_password, body.new_password)
+    except RuntimeError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    except AuthError as exc:
+        raise HTTPException(exc.status, exc.detail) from exc
+    _clear_cookie(response)

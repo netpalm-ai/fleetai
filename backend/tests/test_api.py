@@ -18,7 +18,13 @@ from auth.service import User
 
 
 def _user() -> User:
-    return User(id=uuid4(), username="tester", first_name="Test", last_name="User")
+    return User(
+        id=uuid4(),
+        username="tester",
+        first_name="Test",
+        last_name="User",
+        features=("tickets",),
+    )
 
 
 class ApiTests(unittest.TestCase):
@@ -165,6 +171,20 @@ class ApiTests(unittest.TestCase):
             self.assertEqual(self.client.post("/tickets/T1/verify").status_code, 401)
             self.assertEqual(self.client.post("/tickets/T1/complete").status_code, 401)
             self.assertEqual(self.client.post("/execute").status_code, 401)
+            self.assertEqual(self.client.get("/health").status_code, 200)
+        finally:
+            api.app.dependency_overrides[get_current_user] = _user
+
+    def test_ticket_routes_require_entitlement(self) -> None:
+        api.app.dependency_overrides[get_current_user] = lambda: User(
+            id=uuid4(),
+            username="tester",
+            first_name="Test",
+            last_name="User",
+        )
+        try:
+            self.assertEqual(self.client.get("/tickets").status_code, 403)
+            self.assertEqual(self.client.post("/execute").status_code, 403)
             self.assertEqual(self.client.get("/health").status_code, 200)
         finally:
             api.app.dependency_overrides[get_current_user] = _user

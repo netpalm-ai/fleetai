@@ -13,6 +13,8 @@ erDiagram
   product_tiers ||--o{ user_subscriptions : "grants"
   product_tiers ||--o{ tier_entitlements : allows
   product_features ||--o{ tier_entitlements : "entitled by"
+  users ||--o{ subscription_events : "history"
+  product_tiers ||--o{ subscription_events : "from/to"
 
   users {
     uuid id PK
@@ -20,6 +22,15 @@ erDiagram
     citext email
     text status
     timestamptz last_signed_in_ts
+  }
+
+  subscription_events {
+    uuid id PK
+    uuid user_id FK
+    text product_id FK
+    uuid from_tier_id
+    uuid to_tier_id FK
+    timestamptz at
   }
 
   products {
@@ -65,10 +76,10 @@ Runtime entitlements: join `user_subscriptions` → `product_tiers` → `tier_en
 
 | product | tier | entitled features |
 |---|---|---|
-| `fleetai` | `free` | (named later) |
-| `fleetai` | `trial` | (named later) |
-| `fleetai` | `paid` | (named later) |
+| `fleetai` | `free` | `tickets` |
+| `fleetai` | `trial` | `tickets` |
+| `fleetai` | `paid` | `tickets` |
 
 Signup for FleetAI inserts `user_subscriptions (user, fleetai, free)`. A plan change updates `tier_id` on that row. Another Netpalm product is another `products` row and another `user_subscriptions` row, not another column on `users`.
 
-FleetAI is seeded in `backend/migrations/001_auth.sql`: product `fleetai`, tiers `free` / `trial` / `paid`, no feature keys yet.
+FleetAI is seeded in `backend/migrations/001_auth.sql`: product `fleetai`, tiers `free` / `trial` / `paid`, feature `tickets` on every tier. Ticket and job APIs require that entitlement. A password_hash update revokes all sessions for that user. `tier_entitlements` includes `product_id` so a feature cannot be attached to another product’s tier. Subscription tier changes are appended to `subscription_events`. The API pool uses role `fleetai_runtime` (DML only).

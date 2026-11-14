@@ -87,7 +87,7 @@ def create_session(user_id, token: str, ip: str | None, user_agent: str | None) 
             INSERT INTO sessions (user_id, token_hash, expires_at, ip, user_agent)
             VALUES (%s, %s, now() + %s, %s, %s)
             """,
-            (user_id, token_hash(token), timedelta(days=session_max_days()), client_ip(ip), user_agent),
+            (user_id, token_hash(token), timedelta(days=session_max_days()), client_ip(ip), None),
         )
         conn.commit()
 

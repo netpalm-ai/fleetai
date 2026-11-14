@@ -2,10 +2,16 @@
 
 from __future__ import annotations
 
-from fastapi import HTTPException, Request
+from fastapi import Depends, HTTPException, Request
 
 import db
-from auth.service import USER_FLEETAI_COLS, USER_FLEETAI_JOINS, User, user_from_row
+from auth.service import (
+    FLEETAI_FEATURE_TICKETS,
+    USER_FLEETAI_COLS,
+    USER_FLEETAI_JOINS,
+    User,
+    user_from_row,
+)
 from auth.sessions import COOKIE_NAME, CSRF_HEADER, CSRF_VALUE, session_idle_days, token_hash, touch_session
 
 
@@ -40,3 +46,9 @@ def get_current_user(request: Request) -> User:
         raise HTTPException(401, "unauthorized")
     touch_session(row["session_id"])
     return user_from_row(row)
+
+
+def require_tickets(user: User = Depends(get_current_user)) -> User:
+    if FLEETAI_FEATURE_TICKETS not in user.features:
+        raise HTTPException(403, "forbidden")
+    return user

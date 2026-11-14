@@ -70,8 +70,12 @@ class AuthTests(unittest.TestCase):
         self.assertIsNone(created.json()["last_signed_in_ts"])
         self.assertEqual(created.json()["subscription_status"], "free")
         self.assertEqual(created.json()["registered_product"], "fleetai")
-        self.assertEqual(created.json()["features"], [])
+        self.assertEqual(created.json()["features"], ["tickets"])
         with db.get_pool().connection() as conn:
+            event = conn.execute(
+                "SELECT product_id FROM subscription_events WHERE user_id = %s",
+                (created.json()["id"],),
+            ).fetchone()
             sub = conn.execute(
                 """
                 SELECT us.product_id, pt.status
@@ -148,6 +152,7 @@ class AuthTests(unittest.TestCase):
             headers=CSRF,
         )
         self.assertEqual(second.status_code, 409)
+        self.assertEqual(second.json()["detail"], "account taken")
 
     def test_invalid_register(self) -> None:
         not_email = self.client.post(
@@ -264,3 +269,33 @@ class AuthTests(unittest.TestCase):
         )
         self.assertEqual(disabled_login.status_code, 401)
         self.assertEqual(disabled_login.json()["detail"], "invalid credentials")
+
+    def test_password_change_revokes_sessions(self) -> None:
+        created = self.client.post("/auth/register", json=_reg(ADA), headers=CSRF)
+        self._verify(created.json()["id"])
+        self.client.post(
+            "/auth/login",
+            json={"email": ADA, "password": PASSWORD},
+            headers=CSRF,
+        )
+        self.assertEqual(self.client.get("/auth/me").status_code, 200)
+        changed = self.client.post(
+            "/auth/password",
+            json={"current_password": PASSWORD, "new_password": "correct-horse-2"},
+            headers=CSRF,
+        )
+        self.assertEqual(changed.status_code, 204)
+        self.assertEqual(self.client.get("/auth/me").status_code, 401)
+        old = self.client.post(
+            "/auth/login",
+            json={"email": ADA, "password": PASSWORD},
+            headers=CSRF,
+        )
+        self.assertEqual(old.status_code, 401)
+        new = self.client.post(
+            "/auth/login",
+            json={"email": ADA, "password": "correct-horse-2"},
+            headers=CSRF,
+        )
+        self.assertEqual(new.status_code, 200)
+        self.assertEqual(self.client.get("/tickets").status_code, 200)
