@@ -4,17 +4,37 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta
 from uuid import UUID
 
-from psycopg.errors import IntegrityError
+from psycopg.errors import UniqueViolation
 
 import db
 from auth import passwords, sessions
 
 MAX_EMAIL = 254
 MAX_NAME = 80
+FLEETAI_PRODUCT = "fleetai"
+FLEETAI_TIER_FREE = "free"
 _EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+USER_FLEETAI_COLS = """
+u.id, u.username, u.first_name, u.last_name, u.email,
+u.status, u.last_signed_in_ts,
+pt.status AS subscription_status,
+us.product_id AS registered_product,
+COALESCE((
+  SELECT array_agg(pf.key ORDER BY pf.key)
+  FROM tier_entitlements te
+  JOIN product_features pf ON pf.id = te.feature_id
+  WHERE te.tier_id = us.tier_id
+), '{}'::text[]) AS features
+"""
+USER_FLEETAI_JOINS = """
+FROM users u
+LEFT JOIN user_subscriptions us
+  ON us.user_id = u.id AND us.product_id = 'fleetai'
+LEFT JOIN product_tiers pt ON pt.id = us.tier_id
+"""
 
 
 @dataclass(frozen=True)
@@ -23,6 +43,12 @@ class User:
     username: str
     first_name: str
     last_name: str
+    email: str = ""
+    subscription_status: str = "free"
+    registered_product: str = ""
+    features: tuple[str, ...] = ()
+    status: str = "active"
+    last_signed_in_ts: datetime | None = None
 
 
 class AuthError(Exception):
@@ -48,12 +74,36 @@ def valid_name(value: str) -> bool:
     return bool(value) and len(value) <= MAX_NAME
 
 
+def _normalize_username(value: str) -> str:
+    return value.strip()
+
+
+def valid_username(value: str) -> bool:
+    return bool(value) and len(value) <= MAX_NAME and not any(ch.isspace() for ch in value)
+
+
+def _row_features(row) -> tuple[str, ...]:
+    try:
+        value = row["features"]
+    except (KeyError, IndexError):
+        return ()
+    if not value:
+        return ()
+    return tuple(str(item) for item in value)
+
+
 def user_from_row(row) -> User:
     return User(
         id=row["id"],
         username=str(row["username"]),
         first_name=str(row["first_name"] or ""),
         last_name=str(row["last_name"] or ""),
+        email=str(row.get("email") or ""),
+        subscription_status=str(row.get("subscription_status") or "free"),
+        registered_product=str(row.get("registered_product") or ""),
+        features=_row_features(row),
+        status=str(row.get("status") or "active"),
+        last_signed_in_ts=row.get("last_signed_in_ts"),
     )
 
 
@@ -104,6 +154,7 @@ def verify_email(token: str) -> None:
 
 def register(
     username: str,
+    email: str,
     first_name: str,
     last_name: str,
     password: str,
@@ -111,10 +162,11 @@ def register(
     ip: str | None,
     user_agent: str | None,
 ) -> User:
-    name = _normalize_email(username)
+    handle = _normalize_username(username)
+    name = _normalize_email(email)
     given = _normalize_name(first_name)
     family = _normalize_name(last_name)
-    if not valid_email(name) or not valid_name(given) or not valid_name(family):
+    if not valid_username(handle) or not valid_email(name) or not valid_name(given) or not valid_name(family):
         raise AuthError(422, "invalid")
     if not tos_accepted:
         raise AuthError(422, "invalid")
@@ -122,16 +174,34 @@ def register(
         raise AuthError(422, "invalid")
     try:
         with db.get_pool().connection() as conn:
-            row = conn.execute(
-                """
-                INSERT INTO users (username, email, first_name, last_name, password_hash, tos_accepted_at)
-                VALUES (%s, %s, %s, %s, %s, now())
-                RETURNING id, username, first_name, last_name
-                """,
-                (name, name, given, family, passwords.hash_password(password)),
-            ).fetchone()
-            conn.commit()
-    except IntegrityError as exc:
+            with conn.transaction():
+                row = conn.execute(
+                    """
+                    INSERT INTO users (
+                        username, email, first_name, last_name, password_hash
+                    )
+                    VALUES (%s, %s, %s, %s, %s)
+                    RETURNING id, username, first_name, last_name, email
+                    """,
+                    (handle, name, given, family, passwords.hash_password(password)),
+                ).fetchone()
+                if row is None:
+                    raise AuthError(500, "register failed")
+                conn.execute(
+                    """
+                    INSERT INTO user_subscriptions (user_id, product_id, tier_id)
+                    SELECT %s, %s, id FROM product_tiers
+                    WHERE product_id = %s AND status = %s
+                    """,
+                    (row["id"], FLEETAI_PRODUCT, FLEETAI_PRODUCT, FLEETAI_TIER_FREE),
+                )
+                row = conn.execute(
+                    f"SELECT {USER_FLEETAI_COLS} {USER_FLEETAI_JOINS} WHERE u.id = %s",
+                    (row["id"],),
+                ).fetchone()
+    except UniqueViolation as exc:
+        if getattr(exc.diag, "constraint_name", None) == "users_username_key":
+            raise AuthError(409, "username taken") from exc
         raise AuthError(409, "email taken") from exc
     if row is None:
         raise AuthError(500, "register failed")
@@ -140,28 +210,39 @@ def register(
     return user
 
 
-def login(username: str, password: str, ip: str | None, user_agent: str | None) -> tuple[User, str]:
-    name = _normalize_email(username)
+def login(email: str, password: str, ip: str | None, user_agent: str | None) -> tuple[User, str]:
+    name = _normalize_email(email)
     if not valid_email(name) or not password or len(password) > passwords.MAX_PASSWORD:
         raise AuthError(422, "invalid")
     with db.get_pool().connection() as conn:
         row = conn.execute(
-            """
-            SELECT id, username, first_name, last_name, password_hash, status, email_verified
-            FROM users WHERE username = %s
+            f"""
+            SELECT {USER_FLEETAI_COLS},
+                   u.password_hash, u.email_verified
+            {USER_FLEETAI_JOINS}
+            WHERE u.email = %s
             """,
             (name,),
         ).fetchone()
-    if row is None:
-        passwords.verify_dummy(password)
-        raise AuthError(401, "invalid credentials")
-    if not passwords.verify_password(row["password_hash"], password):
-        raise AuthError(401, "invalid credentials")
-    if row["status"] != "active":
-        raise AuthError(401, "invalid credentials")
-    if not row["email_verified"]:
-        raise AuthError(403, "email not verified")
-    user = user_from_row(row)
+        if row is None:
+            passwords.verify_dummy(password)
+            raise AuthError(401, "invalid credentials")
+        if not passwords.verify_password(row["password_hash"], password):
+            raise AuthError(401, "invalid credentials")
+        if row["status"] != "active":
+            raise AuthError(401, "invalid credentials")
+        if not row["email_verified"]:
+            raise AuthError(403, "email not verified")
+        signed = conn.execute(
+            """
+            UPDATE users SET last_signed_in_ts = now()
+            WHERE id = %s
+            RETURNING last_signed_in_ts
+            """,
+            (row["id"],),
+        ).fetchone()
+        conn.commit()
+    user = user_from_row({**row, "last_signed_in_ts": signed["last_signed_in_ts"] if signed else None})
     token = sessions.new_token()
     sessions.create_session(user.id, token, ip, user_agent)
     return user, token

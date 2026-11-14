@@ -21,6 +21,7 @@ export function SignUpPage() {
     const form = new FormData(event.currentTarget);
     const firstName = String(form.get("first_name") ?? "");
     const lastName = String(form.get("last_name") ?? "");
+    const handle = String(form.get("username") ?? "");
     const name = String(form.get("email") ?? "");
     const password = String(form.get("password") ?? "");
     const confirm = String(form.get("confirm") ?? "");
@@ -32,7 +33,7 @@ export function SignUpPage() {
       setError("Passwords do not match.");
       return;
     }
-    const message = await signUp(firstName, lastName, name, password, accepted);
+    const message = await signUp(firstName, lastName, handle, name, password, accepted);
     if (message) {
       setError(message);
       return;
@@ -67,6 +68,10 @@ export function SignUpPage() {
         <label className="field">
           Last name
           <input name="last_name" autoComplete="family-name" required maxLength={80} />
+        </label>
+        <label className="field">
+          Username
+          <input name="username" autoComplete="username" required maxLength={80} />
         </label>
         <label className="field">
           Email

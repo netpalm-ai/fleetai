@@ -51,8 +51,10 @@ src/pages/TicketsPage.tsx
 src/session.tsx            GET /api/v1/auth/me; no localStorage accounts
 ```
 
-Auth is the backend cookie session. `/signup` posts `{username, password, tos_accepted}`
-to `/api/v1/auth/register`. `/login` posts `{username, password}` to `/api/v1/auth/login`.
+Auth is the backend cookie session. `/signup` posts
+`{username, email, first_name, last_name, password, tos_accepted}`
+to `/api/v1/auth/register`. `/login` posts `{email, password}` to `/api/v1/auth/login`.
+`username` is the handle; sign-in uses `email`.
 On load, `GET /api/v1/auth/me`. Non-GET fetches send `X-Requested-With: fleetai` and
 `credentials: 'same-origin'`. 401 on `/tickets` redirects to `/login`. Do not store
 passwords or accounts in localStorage. Routes: `/` intro, `/login`, `/signup`,

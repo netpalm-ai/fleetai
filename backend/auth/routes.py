@@ -14,6 +14,7 @@ router = APIRouter()
 
 class RegisterBody(BaseModel):
     username: str
+    email: str
     first_name: str
     last_name: str
     password: str
@@ -21,7 +22,7 @@ class RegisterBody(BaseModel):
 
 
 class LoginBody(BaseModel):
-    username: str
+    email: str
     password: str
 
 
@@ -60,8 +61,14 @@ def _user_json(user: User) -> dict:
     return {
         "id": str(user.id),
         "username": user.username,
+        "email": user.email,
         "first_name": user.first_name,
         "last_name": user.last_name,
+        "status": user.status,
+        "last_signed_in_ts": user.last_signed_in_ts.isoformat() if user.last_signed_in_ts else None,
+        "subscription_status": user.subscription_status,
+        "registered_product": user.registered_product,
+        "features": list(user.features),
     }
 
 
@@ -70,6 +77,7 @@ def post_register(body: RegisterBody, request: Request, _: None = Depends(requir
     try:
         user = register(
             body.username,
+            body.email,
             body.first_name,
             body.last_name,
             body.password,
@@ -97,7 +105,7 @@ def post_verify(body: VerifyBody, _: None = Depends(require_csrf)) -> dict:
 @router.post("/login")
 def post_login(body: LoginBody, request: Request, response: Response, _: None = Depends(require_csrf)) -> dict:
     try:
-        user, token = login(body.username, body.password, *_client(request))
+        user, token = login(body.email, body.password, *_client(request))
     except RuntimeError as exc:
         raise HTTPException(503, str(exc)) from exc
     except AuthError as exc:

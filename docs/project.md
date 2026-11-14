@@ -158,6 +158,6 @@ CI reads `${{ vars.* }}` and `${{ secrets.* }}`. Ubuntu runs backend pytest and 
 
 ## Docker
 
-`backend` is the runner API, not the customer. Tickets persist at `FLEETAI_TICKETS_DIR`. Product checkouts bind from `FLEETAI_PRODUCT_ROOT`. One uvicorn worker. `postgres` is `postgres:16-alpine` with named volume `pgdata`, published at `127.0.0.1:5432`. `frontend` is the web app; nginx proxies `/api/v1/` to `backend:8000` and rate-limits `/api/v1/auth/login`. Compose publishes `127.0.0.1:8000` (API) and `127.0.0.1:8080` (UI). Auth is an HttpOnly cookie session. Ticket JSON workflow is unchanged.
+`backend` is the runner API, not the customer. Tickets persist at `FLEETAI_TICKETS_DIR`. Product checkouts bind from `FLEETAI_PRODUCT_ROOT`. One uvicorn worker. `postgres` is `postgres:16-alpine` with named volume `pgdata`, published at `127.0.0.1:5432`. Product, tier, and feature entitlements: [erd.md](erd.md). `frontend` is the web app; nginx proxies `/api/v1/` to `backend:8000` and rate-limits `/api/v1/auth/login`. Compose publishes `127.0.0.1:8000` (API) and `127.0.0.1:8080` (UI). Auth is an HttpOnly cookie session. Ticket JSON workflow is unchanged.
 
 Ollama on the Docker host is `http://host.docker.internal:11434`. A Mac `node_modules` or venv inside the Linux image will not run.

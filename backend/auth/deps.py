@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import HTTPException, Request
 
 import db
-from auth.service import User
+from auth.service import USER_FLEETAI_COLS, USER_FLEETAI_JOINS, User, user_from_row
 from auth.sessions import COOKIE_NAME, CSRF_HEADER, CSRF_VALUE, session_idle_days, token_hash, touch_session
 
 
@@ -21,10 +21,10 @@ def get_current_user(request: Request) -> User:
     try:
         with db.get_pool().connection() as conn:
             row = conn.execute(
-                """
-                SELECT u.id, u.username, u.first_name, u.last_name, s.id AS session_id
-                FROM sessions s
-                JOIN users u ON u.id = s.user_id
+                f"""
+                SELECT {USER_FLEETAI_COLS}, s.id AS session_id
+                {USER_FLEETAI_JOINS}
+                JOIN sessions s ON s.user_id = u.id
                 WHERE s.token_hash = %s
                   AND s.revoked_at IS NULL
                   AND s.expires_at > now()
@@ -39,9 +39,4 @@ def get_current_user(request: Request) -> User:
     if row is None:
         raise HTTPException(401, "unauthorized")
     touch_session(row["session_id"])
-    return User(
-        id=row["id"],
-        username=str(row["username"]),
-        first_name=str(row["first_name"] or ""),
-        last_name=str(row["last_name"] or ""),
-    )
+    return user_from_row(row)

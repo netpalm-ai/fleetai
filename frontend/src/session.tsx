@@ -9,18 +9,25 @@ const MAX_PASSWORD = 128;
 type AuthUser = {
   id: string;
   username: string;
+  email: string;
   first_name: string;
   last_name: string;
+  status: string;
+  last_signed_in_ts: string | null;
+  subscription_status: string;
+  registered_product: string;
+  features: string[];
 };
 
 type SessionValue = {
   username: string | null;
   ready: boolean;
-  signIn: (username: string, password: string) => Promise<string | null>;
+  signIn: (email: string, password: string) => Promise<string | null>;
   signUp: (
     firstName: string,
     lastName: string,
     username: string,
+    email: string,
     password: string,
     tosAccepted: boolean,
   ) => Promise<string | null>;
@@ -36,6 +43,9 @@ export function isEmail(value: string): boolean {
 function errorMessage(err: unknown, fallback: string): string {
   if (err instanceof ApiError) {
     if (err.status === 409) {
+      if (err.message === "username taken") {
+        return "That username is already in use.";
+      }
       return "That email is already in use. Sign in instead.";
     }
     if (err.status === 401) {
@@ -67,12 +77,12 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     () => ({
       username,
       ready,
-      async signIn(rawName: string, password: string) {
-        const name = rawName.trim();
+      async signIn(rawEmail: string, password: string) {
+        const name = rawEmail.trim();
         try {
           const user = await request<AuthUser>("/auth/login", {
             method: "POST",
-            body: JSON.stringify({ username: name, password }),
+            body: JSON.stringify({ email: name, password }),
           });
           setUsername(user.username);
           return null;
@@ -86,15 +96,20 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       async signUp(
         rawFirst: string,
         rawLast: string,
-        rawName: string,
+        rawUsername: string,
+        rawEmail: string,
         password: string,
         tosAccepted: boolean,
       ) {
         const firstName = rawFirst.trim();
         const lastName = rawLast.trim();
-        const name = rawName.trim();
+        const handle = rawUsername.trim();
+        const name = rawEmail.trim();
         if (!firstName || !lastName) {
           return "Enter a first and last name.";
+        }
+        if (!handle) {
+          return "Enter a username.";
         }
         if (!name || !password) {
           return "Enter an email and password.";
@@ -112,7 +127,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           await request<AuthUser>("/auth/register", {
             method: "POST",
             body: JSON.stringify({
-              username: name,
+              username: handle,
+              email: name,
               first_name: firstName,
               last_name: lastName,
               password,
