@@ -123,7 +123,7 @@ erDiagram
 
 ## Retention
 
-`tickets.handled_at` is set when a ticket becomes `fixed` or `completed` and stays null while it is open. Open tickets are never deleted. A handled ticket is deleted by tier: `free` immediately, `trial` after 7 days, `paid` after `user_subscriptions.ticket_retention_days` days (default 90, NULL keeps it permanently; the API accepts 7, 30, or 90). Only a `paid` user can change that value, from the Settings page. A deactivated intake that no ticket references is deleted in the same purge.
+`tickets.handled_at` is set when a ticket becomes `fixed` or `completed` and stays null while it is open. Tickets and their run reports are kept permanently for audit. The tier only controls how long a handled ticket stays visible in the product: `free` hides immediately, `trial` after 7 days, `paid` after `user_subscriptions.ticket_retention_days` days (default 90, NULL stays visible permanently; the API accepts 7, 30, or 90). Only a `paid` user can change that value, from the Settings page. A deactivated intake that no ticket references is deleted by the hourly purge.
 
 ## Example shape (FleetAI)
 
@@ -133,6 +133,6 @@ erDiagram
 | `fleetai` | `trial` | `tickets` |
 | `fleetai` | `paid` | `tickets` |
 
-Signup for FleetAI inserts `user_subscriptions (user, fleetai, free)`. A plan change updates `tier_id` on that row. Another Netpalm product is another `products` row and another `user_subscriptions` row, not another column on `users`.
+Signup for FleetAI inserts `user_subscriptions (user, fleetai, free)`. A plan change updates `tier_id` on that row. Another Netpalm product is another `products` row and another `user_subscriptions` row, not another column on `users`. The account is shared: the first sign-in to another product inserts that product's signup-tier row. Each product keeps its own data in its own tables keyed by `users.id`.
 
 FleetAI is seeded in `backend/migrations/001_auth.sql`: product `fleetai`, tiers `free` / `trial` / `paid`, feature `tickets` on every tier. Ticket and job APIs require that entitlement. A password_hash update revokes all sessions for that user. `tier_entitlements` includes `product_id` so a feature cannot be attached to another product’s tier. Subscription tier changes are appended to `subscription_events`. The API pool uses role `fleetai_runtime` (DML only).

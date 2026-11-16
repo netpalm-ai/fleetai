@@ -87,9 +87,23 @@ Find the test file next to the changed module, then run that file.
 Do not skip tests because this map is short. Do not run an unrelated
 full suite when a focused file covers the change.
 
-- `jmd-frontend`: `NODE_OPTIONS=--localstorage-file=/tmp/jmd-vitest-localstorage npm run test:run -- <file>` from the repo root. Also `npm run build` for UI/API client changes.
+The ticket file is not the whole bar. After a diff, run the command below
+for every child repo the diff touches, with the same extra services CI
+would start. Also run tests of consumers of those changes, and opposite
+cases: a stamp change in `snomed` also runs the frontend snomed panel
+tests; a panel change must still prove the stamped fields exist in
+`snomed` (or list that item not done). `jarvismd-backend` pass-through
+changes need both backend unit tests and a check that the SPA still
+reads the same keys.
+
+To check a runtime claim (which image a host runs), use the SSH aliases
+above and `docker ps` / env names only. Never print secrets. If the
+named service is not on that host, the claim is false — do not patch a
+copy that is not there.
+
+- `jmd-frontend`: `NODE_OPTIONS=--localstorage-file=/tmp/jmd-vitest-localstorage npm run test:run -- <file>` from the repo root. Also `npm run build` for UI/API client changes. For panel work run the snomed component tests, not one ticket case.
 - `jmd-gp-consult-template`: `npm test -- --runInBand` then vendor into `jmd-frontend`.
 - `transcribe/backend`: `npm test` and `npm run build`. Live AWS tests skip without credentials.
 - `jarvismd-backend`: Python 3.13 only. From `app/`: `python -m pytest app/tests/unit/<module> -q`. macOS system Python 3.9 cannot collect the suite.
 - `nlp-services`: `python -m pytest tests/test_<area>.py -q` in an env that has the worker deps.
-- `snomed`: `pytest tests/` on that repo. The browser must not call it.
+- `snomed`: `pytest tests/` on that repo (CI sets `SNOMED_MONGODB_URI`; local runs without it are not CI). The browser must not call it.

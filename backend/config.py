@@ -176,6 +176,7 @@ FAILED = "failed"
 _STATUS = {name.lower(): name for name in TICKET_STATES}
 REQUIRED = ("title", "severity", "services", "context", "expected")
 TECH_FIELDS = ("id", "title", "severity", "services", "context", "expected")
+REPORT_CHARS = 4000
 def product_cwd() -> Path:
     root = Path(require_env("FLEETAI_PRODUCT_ROOT"))
     if not root.is_dir():
@@ -290,6 +291,75 @@ def last_verdict(text: str | None) -> str | None:
         if found:
             return found
     return None
+
+
+
+def changed_files(report: str | None) -> list[str]:
+    lines: list[str] = []
+    collecting = False
+    for raw in (report or "").splitlines():
+        line = raw.strip()
+        upper = line.upper()
+        if upper.startswith("CHANGED FILES:"):
+            collecting = True
+            rest = line.split(":", 1)[1].strip()
+            if rest:
+                lines.append(rest)
+            continue
+        if not collecting:
+            continue
+        if upper.startswith("VERDICT:") or (
+            ":" in line and line.split(":", 1)[0].replace(" ", "").isalpha() and line.split(":", 1)[0].isupper()
+        ):
+            break
+        if line:
+            lines.append(line)
+    return lines
+
+
+def push_ticket(ticket_id: str, report: str | None) -> None:
+    import subprocess
+
+    root = product_cwd()
+    by_repo: dict[str, list[str]] = {}
+    for entry in changed_files(report):
+        parts = entry.split("/", 1)
+        if len(parts) == 2 and (root / parts[0] / ".git").exists():
+            by_repo.setdefault(parts[0], []).append(parts[1])
+        elif (root / ".git").exists():
+            by_repo.setdefault(".", []).append(entry)
+        else:
+            raise RuntimeError("changed file is not under a product git repo: {0}".format(entry))
+    if not by_repo:
+        raise RuntimeError("ticket {0} has no CHANGED FILES to commit".format(ticket_id))
+    for repo, paths in sorted(by_repo.items()):
+        cwd = root if repo == "." else root / repo
+        unique = sorted(set(paths))
+        subprocess.run(["git", "add", "--"] + unique, cwd=cwd, check=True)
+        staged = subprocess.run(
+            ["git", "diff", "--cached", "--name-only"], cwd=cwd, check=True, capture_output=True, text=True
+        ).stdout.splitlines()
+        if not staged:
+            raise RuntimeError("nothing staged in {0} for ticket {1}".format(cwd.name, ticket_id))
+        subprocess.run(
+            ["git", "commit", "-m", "fleetai: {0}".format(ticket_id)],
+            cwd=cwd,
+            check=True,
+        )
+        branch = subprocess.run(
+            ["git", "branch", "--show-current"], cwd=cwd, check=True, capture_output=True, text=True
+        ).stdout.strip()
+        if not branch:
+            raise RuntimeError("detached HEAD in {0}; stay on a branch to push".format(cwd.name))
+        subprocess.run(["git", "push", "origin", "HEAD"], cwd=cwd, check=True)
+        print("{0}\tpushed\t{1}\t{2}".format(ticket_id, cwd.name, branch), flush=True)
+
+
+def clip_report(text: str | None) -> str:
+    report = (text or "").strip()
+    if len(report) <= REPORT_CHARS:
+        return report
+    return "...\n" + report[-REPORT_CHARS:].split("\n", 1)[-1].strip()
 
 
 def solved_prompt(tickets: dict[str, dict]) -> str:

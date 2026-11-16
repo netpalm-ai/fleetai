@@ -52,7 +52,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 503)
 
     def test_lists_tickets(self) -> None:
-        with patch.object(api.intakes, "list_open_tickets", return_value=[{"id": "T1", "status": "unresolved"}]) as listed:
+        with patch.object(api.intakes, "list_visible_tickets", return_value=[{"id": "T1", "status": "unresolved"}]) as listed:
             response = self.client.get("/tickets")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), [{"id": "T1", "status": "unresolved"}])

@@ -9,7 +9,19 @@ import db
 
 TICKET_LIST = "ticket_list"
 SOLVED = ("fixed", "completed")
-_TICKET_COLS = "t.public_id AS id, t.title, t.severity, t.services, t.context, t.expected, t.kind, t.status"
+_TICKET_COLS = """
+t.public_id AS id, t.title, t.severity, t.services, t.context, t.expected, t.kind, t.status,
+t.created_at, t.updated_at, t.handled_at,
+(
+  SELECT r.run_id FROM ticket_runs r WHERE r.ticket_id = t.id ORDER BY r.created_at DESC LIMIT 1
+) AS latest_run_id,
+(
+  SELECT r.kind FROM ticket_runs r WHERE r.ticket_id = t.id ORDER BY r.created_at DESC LIMIT 1
+) AS latest_kind,
+(
+  SELECT r.verdict FROM ticket_runs r WHERE r.ticket_id = t.id ORDER BY r.created_at DESC LIMIT 1
+) AS latest_verdict
+"""
 _KEEP_FOR = """
 CASE COALESCE(pt.status, 'free')
   WHEN 'trial' THEN interval '7 days'
@@ -177,6 +189,38 @@ def list_open_tickets(user_id: UUID) -> list[dict]:
     return [dict(row) for row in rows]
 
 
+def list_visible_tickets(user_id: UUID) -> list[dict]:
+    with db.get_pool().connection() as conn:
+        rows = conn.execute(
+            f"""
+            SELECT {_TICKET_COLS}
+            FROM tickets t
+            LEFT JOIN intakes i ON i.id = t.intake_id
+            LEFT JOIN users u ON u.id = t.user_id
+            {_USER_TIER_JOINS}
+            WHERE t.user_id = %s
+              AND (
+                t.status IN ('unresolved', 'verifying')
+                OR (
+                  t.status IN ('fixed', 'completed')
+                  AND (
+                    {_KEEP_FOR} IS NULL
+                    OR t.handled_at > now() - ({_KEEP_FOR})
+                  )
+                )
+              )
+              AND (
+                t.status IN ('fixed', 'completed')
+                OR t.intake_id IS NULL
+                OR i.status = 'active'
+              )
+            ORDER BY t.public_id
+            """,
+            (user_id,),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
 def open_tickets(user_id: UUID) -> list[dict]:
     with db.get_pool().connection() as conn:
         rows = conn.execute(
@@ -272,20 +316,26 @@ def get_run(user_id: UUID, public_id: str, run_id: str) -> dict | None:
     return dict(row) if row else None
 
 
-def latest_run_id(user_id: UUID, public_id: str) -> str | None:
-    with db.get_pool().connection() as conn:
-        row = conn.execute(
-            """
-            SELECT r.run_id
+def latest_run(user_id: UUID, public_id: str, kind: str | None = None) -> dict | None:
+    sql = """
+            SELECT r.run_id, r.kind, r.verdict, r.prompt, r.result
             FROM ticket_runs r
             JOIN tickets t ON t.id = r.ticket_id
             WHERE t.user_id = %s AND t.public_id = %s
-            ORDER BY r.created_at DESC
-            LIMIT 1
-            """,
-            (user_id, public_id),
-        ).fetchone()
-    return row["run_id"] if row else None
+            """
+    args: list[object] = [user_id, public_id]
+    if kind:
+        sql += " AND r.kind = %s"
+        args.append(kind)
+    sql += " ORDER BY r.created_at DESC LIMIT 1"
+    with db.get_pool().connection() as conn:
+        row = conn.execute(sql, args).fetchone()
+    return dict(row) if row else None
+
+
+def latest_run_id(user_id: UUID, public_id: str) -> str | None:
+    run = latest_run(user_id, public_id)
+    return run["run_id"] if run else None
 
 
 def keep_days(user_id: UUID) -> int | None:
@@ -318,23 +368,6 @@ def set_keep_days(user_id: UUID, days: int | None) -> None:
 
 def purge_handled(user_id: UUID | None = None) -> None:
     with db.get_pool().connection() as conn:
-        conn.execute(
-            f"""
-            WITH keep AS (
-              SELECT u.id AS user_id, {_KEEP_FOR} AS keep_for
-              FROM users u
-              {_USER_TIER_JOINS}
-            )
-            DELETE FROM tickets t
-            USING keep k
-            WHERE k.user_id = t.user_id
-              AND t.status IN ('fixed', 'completed')
-              AND k.keep_for IS NOT NULL
-              AND t.handled_at <= now() - k.keep_for
-              AND (%s::uuid IS NULL OR t.user_id = %s::uuid)
-            """,
-            (user_id, user_id),
-        )
         conn.execute(
             """
             DELETE FROM intakes i

@@ -21,7 +21,7 @@ PROMPT = """Extract unsolved software defects from a source email and/or a bug-r
 
 Use whichever of the email and the bug report are present. Either one of those two is enough. If both are present, use the email for defect facts only. Ignore process asks in both. Do not require additional context.
 
-Business labels (Open, Partially Fixed, Not Yet Fixed, closed, deferred) and process asks (retest lists, deployment dates, build numbers, status tables, screenshots, eval readiness) are not this system's workflow and not engineering work. Do not copy them into the ticket.
+Business labels (Open, Partially Fixed, Not Yet Fixed, closed, deferred) and process asks (retest lists, deployment dates, build numbers, status tables, screenshots, eval readiness, rebuild, merge, redeploy, image-tag requests) are not this system's workflow and not engineering work. Do not copy them into the ticket.
 
 This system only uses unresolved, verifying, and fixed. You do not set those.
 
@@ -89,6 +89,10 @@ def get_tickets(user_id: UUID, session_id: UUID | None = None) -> list[dict]:
     )
     if body.startswith("```"):
         body = body.split("\n", 1)[1].removesuffix("```").strip()
-    tickets = apply_workflow(normalize_tickets(json.loads(body)), intakes.open_tickets(user_id), solved)
+    try:
+        extracted = json.loads(body)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("ticket model did not return JSON") from exc
+    tickets = apply_workflow(normalize_tickets(extracted), intakes.open_tickets(user_id), solved)
     intakes.sync_tickets(user_id, session_id, tickets)
     return tickets

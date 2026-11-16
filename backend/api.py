@@ -13,12 +13,15 @@ import orchestrator
 import parser
 import solver
 import verifier
-from auth.deps import get_current_user, require_csrf, require_tickets
+from auth.deps import get_current_user, require_csrf
 from auth.routes import router as auth_router
-from auth.service import User
+from auth.service import Product, User
 from auth.sessions import start_cleanup
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
 from pydantic import BaseModel, Field
+
+FLEETAI = Product(id="fleetai", name="FleetAI", signup_tier="free")
+TICKETS_FEATURE = "tickets"
 
 _cleanup_stop = None
 
@@ -37,7 +40,14 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(title="fleetai", version=config.VERSION, lifespan=lifespan)
+app.state.auth_product = FLEETAI
 app.include_router(auth_router, prefix="/auth")
+
+
+def require_tickets(user: User = Depends(get_current_user)) -> User:
+    if TICKETS_FEATURE not in user.features:
+        raise HTTPException(403, "forbidden")
+    return user
 
 
 def _call(fn, *args):
@@ -124,7 +134,7 @@ def put_settings(
 
 @app.get("/tickets")
 def get_tickets(user: User = Depends(require_tickets)) -> list[dict]:
-    return intakes.list_open_tickets(user.id)
+    return intakes.list_visible_tickets(user.id)
 
 
 @app.post("/tickets/inputs", status_code=204, response_model=None)

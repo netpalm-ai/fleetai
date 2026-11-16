@@ -54,6 +54,9 @@ src/pages/HomePage.tsx     `/` product intro
 src/pages/LoginPage.tsx    `/login` → POST /api/v1/auth/login
 src/pages/SignUpPage.tsx   `/signup` → POST /api/v1/auth/register
 src/pages/SettingsPage.tsx `/settings` → GET/PUT /api/v1/settings
+src/components/AuthenticatorSetup.tsx  Settings section → POST /api/v1/auth/totp/setup, /enable, /disable
+src/pages/ForgotPasswordPage.tsx  `/forgot` → POST /api/v1/auth/password/forgot
+src/pages/ResetPasswordPage.tsx   `/reset?token=` → POST /api/v1/auth/password/reset
 src/pages/TermsPage.tsx
 src/pages/TicketsPage.tsx
 src/session.tsx            GET /api/v1/auth/me; no localStorage accounts
@@ -61,7 +64,9 @@ src/session.tsx            GET /api/v1/auth/me; no localStorage accounts
 
 Auth is the backend cookie session. `/signup` posts
 `{username, email, first_name, last_name, password, tos_accepted}`
-to `/api/v1/auth/register`. `/login` posts `{email, password}` to `/api/v1/auth/login`.
+to `/api/v1/auth/register`. `/login` posts `{email, password, code}` to `/api/v1/auth/login`; it shows the
+authenticator code field after a `401 code required`.
+A `403` there means the email is not verified yet and a `429` means too many attempts; both get their own message.
 `username` is the handle; sign-in uses `email`.
 On load, `GET /api/v1/auth/me`. Non-GET fetches send `X-Requested-With: fleetai` and
 `credentials: 'same-origin'`. 401 on `/tickets` redirects to `/login`. Do not store

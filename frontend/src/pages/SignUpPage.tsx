@@ -47,7 +47,7 @@ export function SignUpPage() {
         <div className="auth-card">
           <BrandMark large />
           <h1>Verify your email</h1>
-          <p>Account created. Verify your email before you sign in.</p>
+          <p>Account created. Open the email we sent and follow the link to verify your email.</p>
           <p className="auth-foot">
             Already verified? <Link to="/login">Sign in</Link>
           </p>

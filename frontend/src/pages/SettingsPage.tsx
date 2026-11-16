@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { Navigate } from "react-router-dom";
 import { ApiError, getJson, request } from "../api/client";
 import { AppHeader } from "../components/AppHeader";
+import { AuthenticatorSetup } from "../components/AuthenticatorSetup";
 import { useSession } from "../session";
 import type { Settings } from "../types";
 
@@ -15,12 +16,16 @@ const KEEP_OPTIONS = [
 
 function keepText(days: number | null): string {
   if (days === null) {
-    return "Handled tickets are kept permanently.";
+    return "Handled tickets stay visible permanently. They are kept for audit either way.";
   }
   if (days === 0) {
-    return "Handled tickets are deleted as soon as they are fixed or completed.";
+    return "Handled tickets are hidden as soon as they are fixed or completed. They are kept for audit.";
   }
-  return "Handled tickets are deleted " + String(days) + " days after they are fixed or completed.";
+  return (
+    "Handled tickets stay visible for " +
+    String(days) +
+    " days after they are fixed or completed. They are kept for audit either way."
+  );
 }
 
 export function SettingsPage() {
@@ -97,7 +102,7 @@ export function SettingsPage() {
             {settings.editable ? (
               <form onSubmit={(event) => void onSave(event)}>
                 <label className="field">
-                  Keep handled tickets for
+                  Show handled tickets for
                   <select value={keep} onChange={(event) => setKeep(event.target.value)}>
                     {KEEP_OPTIONS.map((option) => (
                       <option key={option.value} value={option.value}>
@@ -114,6 +119,7 @@ export function SettingsPage() {
             ) : null}
           </section>
         ) : null}
+        <AuthenticatorSetup onError={fail} />
       </main>
     </>
   );

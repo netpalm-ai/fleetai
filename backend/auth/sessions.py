@@ -4,14 +4,18 @@ from __future__ import annotations
 
 import hashlib
 import ipaddress
+import logging
 import os
 import secrets
 import threading
 from datetime import timedelta
 
+logger = logging.getLogger(__name__)
+
 COOKIE_NAME = "fleetai_session"
 CSRF_HEADER = "X-Requested-With"
 CSRF_VALUE = "fleetai"
+MAX_USER_AGENT = 512
 
 
 def session_max_days() -> int:
@@ -23,7 +27,7 @@ def session_idle_minutes() -> int:
 
 
 def cookie_secure() -> bool:
-    return (os.getenv("COOKIE_SECURE") or "").strip().lower() in {"1", "true", "yes"}
+    return (os.getenv("COOKIE_SECURE") or "").strip().lower() not in {"0", "false", "no"}
 
 
 def cookie_max_age() -> int:
@@ -35,7 +39,7 @@ def new_token() -> str:
 
 
 def token_hash(token: str) -> bytes:
-    return hashlib.sha256(token.encode("ascii")).digest()
+    return hashlib.sha256(token.encode("utf-8")).digest()
 
 
 def client_ip(value: str | None) -> str | None:
@@ -57,7 +61,7 @@ def start_cleanup(*extra_tasks) -> threading.Event:
                 try:
                     task()
                 except Exception:
-                    pass
+                    logger.exception("cleanup task failed")
             if stop.wait(3600):
                 return
 
@@ -77,6 +81,8 @@ def cleanup() -> None:
             """
         )
         conn.commit()
+        conn.execute("DELETE FROM users WHERE NOT email_verified AND email_verify_expires_at < now()")
+        conn.commit()
 
 
 def create_session(user_id, token: str, ip: str | None, user_agent: str | None) -> None:
@@ -88,7 +94,13 @@ def create_session(user_id, token: str, ip: str | None, user_agent: str | None) 
             INSERT INTO sessions (user_id, token_hash, expires_at, ip, user_agent)
             VALUES (%s, %s, now() + %s, %s, %s)
             """,
-            (user_id, token_hash(token), timedelta(days=session_max_days()), client_ip(ip), None),
+            (
+                user_id,
+                token_hash(token),
+                timedelta(days=session_max_days()),
+                client_ip(ip),
+                (user_agent or "")[:MAX_USER_AGENT] or None,
+            ),
         )
         conn.commit()
 

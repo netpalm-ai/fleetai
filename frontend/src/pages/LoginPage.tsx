@@ -1,11 +1,12 @@
 import { FormEvent, useState } from "react";
 import { Link, Navigate } from "react-router-dom";
 import { BrandMark } from "../components/BrandMark";
-import { useSession } from "../session";
+import { CODE_REQUIRED, useSession } from "../session";
 
 export function LoginPage() {
   const { username, ready, signIn } = useSession();
   const [error, setError] = useState<string | null>(null);
+  const [needsCode, setNeedsCode] = useState(false);
 
   if (!ready) {
     return null;
@@ -17,7 +18,13 @@ export function LoginPage() {
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
-    setError(await signIn(String(form.get("email") ?? ""), String(form.get("password") ?? "")));
+    const message = await signIn(
+      String(form.get("email") ?? ""),
+      String(form.get("password") ?? ""),
+      String(form.get("code") ?? ""),
+    );
+    setNeedsCode((needed) => needed || message === CODE_REQUIRED);
+    setError(message);
   }
 
   return (
@@ -43,10 +50,19 @@ export function LoginPage() {
             autoComplete="current-password"
           />
         </label>
+        {needsCode ? (
+          <label className="field">
+            Authenticator or recovery code
+            <input name="code" inputMode="numeric" autoComplete="one-time-code" autoFocus />
+          </label>
+        ) : null}
         {error ? <p className="form-error">{error}</p> : null}
         <button className="btn btn-primary btn-block" type="submit">
           Sign in
         </button>
+        <p className="auth-foot">
+          <Link to="/forgot">Forgot password?</Link>
+        </p>
         <p className="auth-foot">
           No account yet? <Link to="/signup">Sign up</Link>
         </p>

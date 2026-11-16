@@ -30,11 +30,28 @@ function liveStatus(ticket: Ticket, running: boolean, activeId: string | null): 
   if (running && ticket.status === "unresolved") {
     return "Queued";
   }
+  if (ticket.status === "unresolved" && ticket.latest_verdict === "blocked") {
+    return "Blocked";
+  }
+  if (ticket.status === "unresolved" && ticket.latest_verdict === "failed") {
+    return "Failed";
+  }
   return "Open";
 }
 
 function ticketBlurb(ticket: Ticket): string {
   return (ticket.context || "").trim().replace(/\s+/g, " ");
+}
+
+function stamp(value: string | null | undefined): string | null {
+  if (!value) {
+    return null;
+  }
+  const when = new Date(value);
+  if (Number.isNaN(when.getTime())) {
+    return value;
+  }
+  return when.toLocaleString();
 }
 
 function fileToBase64(file: File): Promise<string> {
@@ -62,6 +79,9 @@ export function TicketsPage() {
   const [error, setError] = useState<string | null>(null);
   const [job, setJob] = useState<Job | null>(null);
   const [busy, setBusy] = useState(false);
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [report, setReport] = useState<string | null>(null);
+  const [reportBusy, setReportBusy] = useState(false);
   const poll = useRef<number | null>(null);
 
   const load = useCallback(() => {
@@ -164,6 +184,51 @@ export function TicketsPage() {
     const file = event.dataTransfer.files[0];
     if (file) {
       void acceptPdf(file);
+    }
+  }
+
+  async function onComplete(ticketId: string) {
+    setError(null);
+    try {
+      await request<Ticket>("/tickets/" + ticketId + "/complete", { method: "POST" });
+      load();
+    } catch (err: unknown) {
+      if (err instanceof ApiError && err.status === 401) {
+        expire();
+        return;
+      }
+      setError(err instanceof Error ? err.message : "complete failed");
+    }
+  }
+
+  async function onShowReport(ticket: Ticket) {
+    if (!ticket.latest_run_id) {
+      setError("No run report yet.");
+      return;
+    }
+    if (openId === ticket.id) {
+      setOpenId(null);
+      setReport(null);
+      return;
+    }
+    setError(null);
+    setReportBusy(true);
+    setOpenId(ticket.id);
+    try {
+      const body = await getJson<{ text: string }>(
+        "/tickets/" + ticket.id + "/runs/" + ticket.latest_run_id,
+      );
+      setReport(body.text);
+    } catch (err: unknown) {
+      setOpenId(null);
+      setReport(null);
+      if (err instanceof ApiError && err.status === 401) {
+        expire();
+        return;
+      }
+      setError(err instanceof Error ? err.message : "Could not load the report.");
+    } finally {
+      setReportBusy(false);
     }
   }
 
@@ -307,20 +372,49 @@ export function TicketsPage() {
                 {tickets.map((ticket) => {
                   const blurb = ticketBlurb(ticket);
                   const active = ticket.id === activeId;
+                  const handled = stamp(ticket.handled_at);
+                  const outcome = liveStatus(ticket, running, activeId);
                   return (
                     <li
                       key={ticket.id}
                       className={
-                        "ticket-row is-" + ticket.status + (active ? " is-active" : "")
+                        "ticket-row is-" +
+                        ticket.status +
+                        (active ? " is-active" : "") +
+                        (ticket.latest_verdict ? " is-" + ticket.latest_verdict : "")
                       }
                     >
                       <p className="ticket-line">
                         <span className="id">{ticket.id}</span>
                         <span className="ticket-sep">—</span>
                         <span className="ticket-title">{ticket.title || "Untitled"}</span>
-                        <span className="status">{liveStatus(ticket, running, activeId)}</span>
+                        <span className="status">{outcome}</span>
                       </p>
                       {blurb ? <p className="ticket-desc">{blurb}</p> : null}
+                      {handled ? <p className="ticket-meta">Handled {handled}</p> : null}
+                      <div className="ticket-actions">
+                        {ticket.status === "verifying" && !running ? (
+                          <button
+                            type="button"
+                            className="btn btn-primary"
+                            onClick={() => void onComplete(ticket.id)}
+                          >
+                            Mark completed
+                          </button>
+                        ) : null}
+                        {ticket.latest_run_id ? (
+                          <button
+                            type="button"
+                            className="btn"
+                            onClick={() => void onShowReport(ticket)}
+                          >
+                            {openId === ticket.id ? "Hide report" : "Show report"}
+                          </button>
+                        ) : null}
+                      </div>
+                      {openId === ticket.id ? (
+                        <pre className="ticket-report">{reportBusy ? "Loading…" : report || "No report."}</pre>
+                      ) : null}
                     </li>
                   );
                 })}

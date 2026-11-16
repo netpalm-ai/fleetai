@@ -125,6 +125,11 @@ jobs:
       OLLAMA_HOST: http://host.docker.internal:11434
       COOKIE_SECURE: "true"
       SESSION_IDLE_MIN_LIMIT: ${{ vars.SESSION_IDLE_MIN_LIMIT }}
+      PRODUCT_PUBLIC_BASE_URL: ${{ vars.PRODUCT_PUBLIC_BASE_URL }}
+      SMTP_EMAIL_USER: ${{ vars.SMTP_EMAIL_USER }}
+      NO_REPLY_EMAIL_ALIAS: ${{ vars.NO_REPLY_EMAIL_ALIAS }}
+      SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+      AUTH_SECRET_KEY: ${{ secrets.AUTH_SECRET_KEY }}
     steps:
       - uses: actions/checkout@v4
       - name: Deploy

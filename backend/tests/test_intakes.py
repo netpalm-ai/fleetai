@@ -23,7 +23,6 @@ import orchestrator
 import parser
 import solver
 import verifier
-from auth.service import issue_verify_token
 from auth.sessions import COOKIE_NAME
 
 CSRF = {"X-Requested-With": "fleetai"}
@@ -61,22 +60,22 @@ class TicketStorageTests(unittest.TestCase):
         with db.get_pool().connection() as conn:
             conn.execute("TRUNCATE users CASCADE")
             conn.commit()
-        created = self.client.post(
-            "/auth/register",
-            json={
-                "username": "ada",
-                "email": EMAIL,
-                "first_name": "Ada",
-                "last_name": "Lovelace",
-                "password": PASSWORD,
-                "tos_accepted": True,
-            },
-            headers=CSRF,
-        )
+        with patch("auth.service.emails.send_verification_email") as send:
+            created = self.client.post(
+                "/auth/register",
+                json={
+                    "username": "ada",
+                    "email": EMAIL,
+                    "first_name": "Ada",
+                    "last_name": "Lovelace",
+                    "password": PASSWORD,
+                    "tos_accepted": True,
+                },
+                headers=CSRF,
+            )
         self.assertEqual(created.status_code, 201)
         self.user_id = UUID(created.json()["id"])
-        token = issue_verify_token(self.user_id)
-        self.client.post("/auth/verify", json={"token": token}, headers=CSRF)
+        self.client.post("/auth/verify", json={"token": send.call_args.args[2]}, headers=CSRF)
         logged = self.client.post("/auth/login", json={"email": EMAIL, "password": PASSWORD}, headers=CSRF)
         self.assertEqual(logged.status_code, 200)
         self.assertIn(COOKIE_NAME, self.client.cookies)
@@ -111,9 +110,14 @@ class TicketStorageTests(unittest.TestCase):
 
     def _solve_and_verify(self, ticket_id: str, final: str) -> None:
         intakes.sync_tickets(self.user_id, None, [_ticket(ticket_id)])
-        ready = SimpleNamespace(id="run-solve", result="notes\nVERDICT: ready")
-        done = SimpleNamespace(id="run-verify", result="checked\nVERDICT: {0}".format(final))
-        with patch("llm.cursor.run", side_effect=[ready, done]):
+        ready = SimpleNamespace(
+            id="run-solve", result="CHANGED FILES:\napi/login.py\nVERDICT: ready"
+        )
+        done = SimpleNamespace(
+            id="run-verify",
+            result="CHANGED FILES:\napi/login.py\nVERDICT: {0}".format(final),
+        )
+        with patch("llm.cursor.run", side_effect=[ready, done]), patch("verifier.push_ticket"):
             solver.solve(self.user_id, ticket_id)
             verifier.verify(self.user_id, ticket_id)
 
@@ -198,6 +202,57 @@ class TicketStorageTests(unittest.TestCase):
         self.assertEqual([item["id"] for item in tickets], ["T1"])
         self.assertEqual(intakes.find_ticket(self.user_id, "T1")["status"], "unresolved")
 
+    def test_parser_rejects_a_reply_that_is_not_json(self) -> None:
+        self.client.post("/tickets/inputs", json={"email": "login is broken"}, headers=CSRF)
+        with patch.object(parser.bedrock, "complete", return_value="I found one defect."):
+            with self.assertRaisesRegex(RuntimeError, "did not return JSON"):
+                parser.get_tickets(self.user_id, None)
+            answer = self.client.post("/tickets/parse", headers=CSRF)
+        self.assertEqual(answer.status_code, 400)
+
+    def test_verifier_reviews_the_solver_report(self) -> None:
+        intakes.sync_tickets(self.user_id, None, [_ticket("T1")])
+        replies = [
+            SimpleNamespace(id="s1", result="CHANGED FILES:\napi/login.py\nVERDICT: ready"),
+            SimpleNamespace(id="v1", result="checked\nVERDICT: failed"),
+        ]
+        with patch("llm.cursor.run", side_effect=replies), patch("verifier.push_ticket") as push:
+            solver.solve(self.user_id, "T1")
+            verifier.verify(self.user_id, "T1")
+        verify_prompt = intakes.latest_run(self.user_id, "T1", "verify")["prompt"]
+        self.assertIn("SOLVER REPORT\nCHANGED FILES:\napi/login.py\nVERDICT: ready", verify_prompt)
+        push.assert_not_called()
+
+    def test_verifier_rechecks_then_pushes_when_it_edited(self) -> None:
+        intakes.sync_tickets(self.user_id, None, [_ticket("T1")])
+        replies = [
+            SimpleNamespace(id="s1", result="CHANGED FILES:\napi/login.py\nVERDICT: ready"),
+            SimpleNamespace(
+                id="v1",
+                result="fixed a bug\nCHANGED FILES:\napi/login.py\napi/auth.py\nVERDICT: fixed",
+            ),
+            SimpleNamespace(id="v2", result="still good\nCHANGED FILES:\napi/login.py\napi/auth.py\nVERDICT: fixed"),
+        ]
+        with patch("llm.cursor.run", side_effect=replies) as run, patch("verifier.push_ticket") as push:
+            solver.solve(self.user_id, "T1")
+            verifier.verify(self.user_id, "T1")
+        self.assertEqual(run.call_count, 3)
+        self.assertIn("Do not edit any file", run.call_args_list[2].args[0])
+        self.assertEqual(intakes.find_ticket(self.user_id, "T1")["status"], "fixed")
+        push.assert_called_once()
+
+    def test_verifier_pushes_without_a_recheck_when_files_match(self) -> None:
+        intakes.sync_tickets(self.user_id, None, [_ticket("T1")])
+        replies = [
+            SimpleNamespace(id="s1", result="CHANGED FILES:\napi/login.py\nVERDICT: ready"),
+            SimpleNamespace(id="v1", result="ok\nCHANGED FILES:\napi/login.py\nVERDICT: fixed"),
+        ]
+        with patch("llm.cursor.run", side_effect=replies) as run, patch("verifier.push_ticket") as push:
+            solver.solve(self.user_id, "T1")
+            verifier.verify(self.user_id, "T1")
+        self.assertEqual(run.call_count, 2)
+        push.assert_called_once()
+
     def test_execute_runs_the_steps_for_one_user(self) -> None:
         with (
             patch.object(orchestrator.parser, "get_tickets") as parse,
@@ -208,6 +263,66 @@ class TicketStorageTests(unittest.TestCase):
         parse.assert_called_once_with(self.user_id, None)
         solve.assert_called_once_with(self.user_id)
         verify.assert_called_once_with(self.user_id)
+
+    def test_execute_retries_verify_until_fixed(self) -> None:
+        self._tier("paid")
+        intakes.sync_tickets(self.user_id, None, [_ticket("T1")])
+        replies = [
+            SimpleNamespace(id="s1", result="CHANGED FILES:\napi/a.py\nVERDICT: ready"),
+            SimpleNamespace(id="v1", result="broken\nVERDICT: failed"),
+            SimpleNamespace(id="s2", result="CHANGED FILES:\napi/a.py\nVERDICT: ready"),
+            SimpleNamespace(id="v2", result="still broken\nVERDICT: failed"),
+            SimpleNamespace(id="s3", result="CHANGED FILES:\napi/a.py\nVERDICT: ready"),
+            SimpleNamespace(id="v3", result="CHANGED FILES:\napi/a.py\nVERDICT: fixed"),
+        ]
+        with (
+            patch.object(orchestrator.parser, "get_tickets"),
+            patch("llm.cursor.run", side_effect=replies) as run,
+            patch("verifier.push_ticket") as push,
+        ):
+            orchestrator.execute(self.user_id, None)
+        self.assertEqual(run.call_count, 6)
+        self.assertEqual(intakes.find_ticket(self.user_id, "T1")["status"], "fixed")
+        push.assert_called_once()
+        retry_prompt = intakes.latest_run(self.user_id, "T1", "solve")["prompt"]
+        self.assertIn("PREVIOUS ATTEMPT", retry_prompt)
+        self.assertIn("still broken", retry_prompt)
+
+    def test_execute_stops_when_retry_solve_is_blocked(self) -> None:
+        self._tier("paid")
+        intakes.sync_tickets(self.user_id, None, [_ticket("T1")])
+        replies = [
+            SimpleNamespace(id="s1", result="notes\nVERDICT: ready"),
+            SimpleNamespace(id="v1", result="missing tests\nVERDICT: failed"),
+            SimpleNamespace(id="s2", result="cannot patch\nVERDICT: blocked"),
+        ]
+        with (
+            patch.object(orchestrator.parser, "get_tickets"),
+            patch("llm.cursor.run", side_effect=replies) as run,
+        ):
+            orchestrator.execute(self.user_id, None)
+        self.assertEqual(run.call_count, 3)
+        self.assertEqual(intakes.find_ticket(self.user_id, "T1")["status"], "unresolved")
+        retry_prompt = intakes.latest_run(self.user_id, "T1", "solve")["prompt"]
+        self.assertIn("PREVIOUS ATTEMPT", retry_prompt)
+        self.assertIn("missing tests", retry_prompt)
+
+    def test_execute_stops_at_max_solve_attempts(self) -> None:
+        self._tier("paid")
+        intakes.sync_tickets(self.user_id, None, [_ticket("T1")])
+        replies = [
+            SimpleNamespace(id="s{0}".format(index), result="notes\nVERDICT: ready")
+            if index % 2 == 1
+            else SimpleNamespace(id="v{0}".format(index), result="broken\nVERDICT: failed")
+            for index in range(1, 2 * orchestrator.MAX_SOLVE_ATTEMPTS + 3)
+        ]
+        with (
+            patch.object(orchestrator.parser, "get_tickets"),
+            patch("llm.cursor.run", side_effect=replies) as run,
+        ):
+            orchestrator.execute(self.user_id, None)
+        self.assertEqual(run.call_count, 2 * orchestrator.MAX_SOLVE_ATTEMPTS)
+        self.assertEqual(intakes.find_ticket(self.user_id, "T1")["status"], "unresolved")
 
     def test_run_log_is_stored_and_served(self) -> None:
         intakes.sync_tickets(self.user_id, None, [_ticket("T1")])
@@ -231,64 +346,70 @@ class TicketStorageTests(unittest.TestCase):
         self.assertIsNone(intakes.get_run(other, "T1", "run-1"))
         self.assertEqual(intakes.open_tickets(other), [])
 
-    def test_free_tier_deletes_a_handled_ticket_immediately(self) -> None:
-        self._solve_and_verify("T1", "fixed")
-        self.assertIsNone(intakes.find_ticket(self.user_id, "T1"))
+    def test_free_tier_hides_a_handled_ticket_immediately(self) -> None:
+        with patch("verifier.push_ticket"):
+            self._solve_and_verify("T1", "fixed")
+        self.assertEqual(intakes.find_ticket(self.user_id, "T1")["status"], "fixed")
+        self.assertEqual(intakes.list_visible_tickets(self.user_id), [])
         with db.get_pool().connection() as conn:
             runs = conn.execute("SELECT count(*) AS n FROM ticket_runs").fetchone()["n"]
-        self.assertEqual(runs, 0)
+        self.assertEqual(runs, 2)
 
     def test_free_tier_keeps_a_ticket_that_failed_verification(self) -> None:
         self._solve_and_verify("T1", "failed")
         self.assertEqual(intakes.find_ticket(self.user_id, "T1")["status"], "unresolved")
+        self.assertEqual(intakes.list_visible_tickets(self.user_id)[0]["id"], "T1")
 
-    def test_complete_returns_the_ticket_even_when_it_is_deleted(self) -> None:
+    def test_complete_keeps_the_ticket_and_hides_it_on_free(self) -> None:
         intakes.sync_tickets(self.user_id, None, [_ticket("T1", "verifying")])
         completed = self.client.post("/tickets/T1/complete", headers=CSRF)
         self.assertEqual(completed.status_code, 200)
         self.assertEqual(completed.json()["status"], "completed")
-        self.assertIsNone(intakes.find_ticket(self.user_id, "T1"))
+        self.assertEqual(intakes.find_ticket(self.user_id, "T1")["status"], "completed")
+        self.assertEqual(self.client.get("/tickets").json(), [])
 
-    def test_trial_keeps_handled_tickets_for_seven_days(self) -> None:
+    def test_trial_shows_handled_tickets_for_seven_days(self) -> None:
         self._tier("trial")
-        self._solve_and_verify("T1", "fixed")
+        with patch("verifier.push_ticket"):
+            self._solve_and_verify("T1", "fixed")
         self.assertEqual(intakes.keep_days(self.user_id), 7)
-        self.assertEqual(intakes.find_ticket(self.user_id, "T1")["status"], "fixed")
+        self.assertEqual(intakes.list_visible_tickets(self.user_id)[0]["status"], "fixed")
         self._age_handled("T1", 6)
-        intakes.purge_handled()
-        self.assertIsNotNone(intakes.find_ticket(self.user_id, "T1"))
+        self.assertEqual(len(intakes.list_visible_tickets(self.user_id)), 1)
         self._age_handled("T1", 8)
-        intakes.purge_handled()
-        self.assertIsNone(intakes.find_ticket(self.user_id, "T1"))
+        self.assertEqual(intakes.list_visible_tickets(self.user_id), [])
+        self.assertEqual(intakes.find_ticket(self.user_id, "T1")["status"], "fixed")
 
-    def test_paid_keeps_handled_tickets_for_ninety_days_by_default(self) -> None:
+    def test_paid_shows_handled_tickets_for_ninety_days_by_default(self) -> None:
         self._tier("paid")
-        self._solve_and_verify("T1", "fixed")
+        with patch("verifier.push_ticket"):
+            self._solve_and_verify("T1", "fixed")
         self.assertEqual(intakes.keep_days(self.user_id), 90)
         self._age_handled("T1", 89)
-        intakes.purge_handled()
-        self.assertIsNotNone(intakes.find_ticket(self.user_id, "T1"))
+        self.assertEqual(len(intakes.list_visible_tickets(self.user_id)), 1)
         self._age_handled("T1", 91)
-        intakes.purge_handled()
-        self.assertIsNone(intakes.find_ticket(self.user_id, "T1"))
+        self.assertEqual(intakes.list_visible_tickets(self.user_id), [])
+        self.assertIsNotNone(intakes.find_ticket(self.user_id, "T1"))
 
-    def test_paid_user_can_keep_tickets_forever(self) -> None:
+    def test_paid_user_can_show_tickets_forever(self) -> None:
         self._tier("paid")
         intakes.set_keep_days(self.user_id, None)
         self.assertIsNone(intakes.keep_days(self.user_id))
-        self._solve_and_verify("T1", "fixed")
+        with patch("verifier.push_ticket"):
+            self._solve_and_verify("T1", "fixed")
         self._age_handled("T1", 3650)
-        intakes.purge_handled()
-        self.assertIsNotNone(intakes.find_ticket(self.user_id, "T1"))
+        self.assertEqual(intakes.list_visible_tickets(self.user_id)[0]["id"], "T1")
 
-    def test_paid_user_shortening_days_purges_now(self) -> None:
+    def test_paid_user_shortening_days_hides_now(self) -> None:
         self._tier("paid")
-        self._solve_and_verify("T1", "fixed")
+        with patch("verifier.push_ticket"):
+            self._solve_and_verify("T1", "fixed")
         self._age_handled("T1", 40)
         response = self.client.put("/settings", json={"ticket_retention_days": 30}, headers=CSRF)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["ticket_retention_days"], 30)
-        self.assertIsNone(intakes.find_ticket(self.user_id, "T1"))
+        self.assertEqual(intakes.list_visible_tickets(self.user_id), [])
+        self.assertIsNotNone(intakes.find_ticket(self.user_id, "T1"))
 
     def test_settings_by_tier(self) -> None:
         free = self.client.get("/settings").json()

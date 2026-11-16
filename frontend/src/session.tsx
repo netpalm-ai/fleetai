@@ -6,6 +6,9 @@ const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MAX_EMAIL = 254;
 const MIN_PASSWORD = 10;
 const MAX_PASSWORD = 128;
+export const CODE_REQUIRED = "Enter the 6-digit code from your authenticator app, or a recovery code.";
+export const TOO_MANY_ATTEMPTS = "Too many attempts. Try again later.";
+const VERIFY_EMAIL_FIRST = "Verify your email before signing in.";
 const PING_MS = 5 * 60_000;
 const ACTIVITY_EVENTS = ["pointerdown", "pointermove", "keydown", "wheel", "touchstart"];
 
@@ -21,12 +24,13 @@ type AuthUser = {
   registered_product: string;
   features: string[];
   idle_limit_minutes: number;
+  totp_enabled: boolean;
 };
 
 type SessionValue = {
   username: string | null;
   ready: boolean;
-  signIn: (email: string, password: string) => Promise<string | null>;
+  signIn: (email: string, password: string, code: string) => Promise<string | null>;
   signUp: (
     firstName: string,
     lastName: string,
@@ -53,8 +57,8 @@ function errorMessage(err: unknown, fallback: string): string {
     if (err.status === 401) {
       return "invalid credentials";
     }
-    if (err.status === 403) {
-      return "Verify your email before signing in.";
+    if (err.status === 429) {
+      return TOO_MANY_ATTEMPTS;
     }
     if (err.status === 422) {
       return "Check the name, email, password, and Terms of Service.";
@@ -116,19 +120,28 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     () => ({
       username,
       ready,
-      async signIn(rawEmail: string, password: string) {
+      async signIn(rawEmail: string, password: string, code: string) {
         const name = rawEmail.trim();
         try {
           const user = await request<AuthUser>("/auth/login", {
             method: "POST",
-            body: JSON.stringify({ email: name, password }),
+            body: JSON.stringify({ email: name, password, code: code.trim() }),
           });
           setUsername(user.username);
           setIdleMinutes(user.idle_limit_minutes);
           setExpired(false);
           return null;
         } catch (err) {
-          if (err instanceof ApiError && (err.status === 401 || err.status === 403 || err.status === 422)) {
+          if (err instanceof ApiError && err.status === 401 && err.message === "code required") {
+            return CODE_REQUIRED;
+          }
+          if (err instanceof ApiError && err.status === 429) {
+            return TOO_MANY_ATTEMPTS;
+          }
+          if (err instanceof ApiError && err.status === 403) {
+            return VERIFY_EMAIL_FIRST;
+          }
+          if (err instanceof ApiError && (err.status === 401 || err.status === 422)) {
             return "invalid credentials";
           }
           return "Sign in failed.";

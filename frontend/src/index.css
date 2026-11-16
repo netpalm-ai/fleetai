@@ -747,3 +747,36 @@ h3 {
     animation: none;
   }
 }
+
+
+.ticket-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.ticket-meta {
+  color: var(--muted-2);
+  font-size: 12.5px;
+  margin-top: 6px;
+}
+
+.ticket-report {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--line-soft);
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.28);
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  max-height: 320px;
+  overflow: auto;
+}
+
+.ticket-row.is-blocked .status,
+.ticket-row.is-failed .status {
+  color: #e08b7a;
+}
