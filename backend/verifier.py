@@ -78,27 +78,23 @@ def verify(user_id: UUID, ticket_id: str) -> None:
     def make_prompt(ticket: dict, context: str) -> str:
         return verify_prompt(ticket, context, report)
 
-    run_step(user_id, ticket_id, VERIFYING, "verify", make_prompt, {FIXED: FIXED, FAILED: UNRESOLVED})
-    ticket = intakes.find_ticket(user_id, ticket_id)
-    if ticket is None or ticket["status"] != FIXED:
-        return
+    run_step(user_id, ticket_id, VERIFYING, "verify", make_prompt, {FAILED: UNRESOLVED})
     first = intakes.latest_run(user_id, ticket_id, "verify")
-    first_result = first["result"] if first else None
+    if first is None or first["verdict"] != FIXED:
+        return
+    first_result = first["result"]
     if _edited(report, first_result):
-        intakes.set_ticket_status(user_id, ticket_id, VERIFYING)
 
         def make_read_only(ticket: dict, context: str) -> str:
             return verify_prompt(ticket, context, report, read_only=True)
 
-        run_step(
-            user_id, ticket_id, VERIFYING, "verify", make_read_only, {FIXED: FIXED, FAILED: UNRESOLVED}
-        )
-        ticket = intakes.find_ticket(user_id, ticket_id)
-        if ticket is None or ticket["status"] != FIXED:
-            return
+        run_step(user_id, ticket_id, VERIFYING, "verify", make_read_only, {FAILED: UNRESOLVED})
         first = intakes.latest_run(user_id, ticket_id, "verify")
-        first_result = first["result"] if first else None
+        if first is None or first["verdict"] != FIXED:
+            return
+        first_result = first["result"]
     push_ticket(ticket_id, first_result)
+    intakes.set_ticket_status(user_id, ticket_id, FIXED)
 
 
 @locked

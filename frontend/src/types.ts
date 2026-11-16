@@ -13,6 +13,19 @@ export type Ticket = {
   latest_verdict?: string | null;
 };
 
+export type GithubRepo = {
+  full_name: string;
+  selected: boolean;
+};
+
+export type GithubStatus = {
+  configured: boolean;
+  connected: boolean;
+  login: string | null;
+  project: string | null;
+  repos: GithubRepo[];
+};
+
 export type Settings = {
   subscription_status: string;
   ticket_retention_days: number | null;

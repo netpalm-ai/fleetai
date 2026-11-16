@@ -780,3 +780,12 @@ h3 {
 .ticket-row.is-failed .status {
   color: #e08b7a;
 }
+
+.repo-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 240px;
+  overflow: auto;
+  margin: 12px 0;
+}

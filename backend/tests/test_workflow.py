@@ -423,5 +423,11 @@ class PushTicketTests(unittest.TestCase):
             self.assertEqual(names, ["login.py"])
             self.assertEqual((repo / "keep.py").read_text(encoding="utf-8"), "dirty other work\n")
 
+    def test_rejects_a_path_that_leaves_the_repo(self) -> None:
+        with TemporaryDirectory() as raw:
+            with patch.dict("os.environ", {"FLEETAI_PRODUCT_ROOT": raw}):
+                with self.assertRaises(RuntimeError):
+                    config.push_ticket("T1", "CHANGED FILES:\n../secret\nVERDICT: fixed")
+
 if __name__ == "__main__":
     unittest.main()

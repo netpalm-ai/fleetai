@@ -29,6 +29,7 @@ services:
         condition: service_healthy
     environment:
       FLEETAI_PRODUCT_ROOT: /product
+      FLEETAI_PROJECTS: /projects
       DATABASE_URL: postgresql://fleetai:${POSTGRES_PASSWORD}@postgres:5432/fleetai
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
       SESSION_IDLE_MIN_LIMIT: ${SESSION_IDLE_MIN_LIMIT:-60}
@@ -37,6 +38,8 @@ services:
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       AUTH_SECRET_KEY: ${AUTH_SECRET_KEY:-}
       NO_REPLY_EMAIL_ALIAS: ${NO_REPLY_EMAIL_ALIAS:-}
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
       AWS_REGION: ${AWS_REGION}
       AWS_BEARER_TOKEN_BEDROCK: ${AWS_BEARER_TOKEN_BEDROCK:-}
       BEDROCK_MODEL_ID: ${BEDROCK_MODEL_ID}
@@ -55,6 +58,7 @@ services:
       OLLAMA_HOST: http://host.docker.internal:11434
     volumes:
       - ${FLEETAI_PRODUCT_ROOT:?set FLEETAI_PRODUCT_ROOT}:/product
+      - projects:/projects
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
@@ -72,3 +76,4 @@ services:
 
 volumes:
   pgdata:
+  projects:

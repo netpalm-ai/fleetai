@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import contextvars
 import os
 import threading
 import uuid
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from uuid import UUID
 
@@ -177,11 +179,46 @@ _STATUS = {name.lower(): name for name in TICKET_STATES}
 REQUIRED = ("title", "severity", "services", "context", "expected")
 TECH_FIELDS = ("id", "title", "severity", "services", "context", "expected")
 REPORT_CHARS = 4000
-def product_cwd() -> Path:
+_checkout: contextvars.ContextVar[Checkout | None] = contextvars.ContextVar("github_checkout", default=None)
+
+
+@dataclass(frozen=True)
+class Checkout:
+    root: Path
+    token: str | None = None
+    branch: str | None = None
+
+
+def activate_checkout(checkout: Checkout) -> contextvars.Token:
+    return _checkout.set(checkout)
+
+
+def restore_checkout(token: contextvars.Token) -> None:
+    _checkout.reset(token)
+
+
+def active_checkout() -> Checkout | None:
+    return _checkout.get()
+
+
+def base_product_root() -> Path:
     root = Path(require_env("FLEETAI_PRODUCT_ROOT"))
     if not root.is_dir():
         raise RuntimeError("product root is missing: {0}".format(root))
     return root
+
+
+def projects_root() -> Path:
+    root = Path(require_env("FLEETAI_PROJECTS"))
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def product_cwd() -> Path:
+    current = active_checkout()
+    if current is not None:
+        return current.root
+    return base_product_root()
 
 
 def _read_required(path: Path, label: str) -> str:
@@ -320,12 +357,20 @@ def changed_files(report: str | None) -> list[str]:
 def push_ticket(ticket_id: str, report: str | None) -> None:
     import subprocess
 
+    import connections
+
     root = product_cwd()
+    checkout = active_checkout()
+    token = checkout.token if checkout else None
+    target = checkout.branch if checkout else None
     by_repo: dict[str, list[str]] = {}
     for entry in changed_files(report):
-        parts = entry.split("/", 1)
-        if len(parts) == 2 and (root / parts[0] / ".git").exists():
-            by_repo.setdefault(parts[0], []).append(parts[1])
+        name, sep, rel = entry.partition("/")
+        path = Path(rel if sep else entry)
+        if path.is_absolute() or ".." in path.parts or name in {".", ".."}:
+            raise RuntimeError("changed file is not under a product git repo: {0}".format(entry))
+        if sep and (root / name / ".git").exists():
+            by_repo.setdefault(name, []).append(rel)
         elif (root / ".git").exists():
             by_repo.setdefault(".", []).append(entry)
         else:
@@ -335,23 +380,24 @@ def push_ticket(ticket_id: str, report: str | None) -> None:
     for repo, paths in sorted(by_repo.items()):
         cwd = root if repo == "." else root / repo
         unique = sorted(set(paths))
-        subprocess.run(["git", "add", "--"] + unique, cwd=cwd, check=True)
+        connections.github.git(cwd, token, "add", "--", *unique)
         staged = subprocess.run(
             ["git", "diff", "--cached", "--name-only"], cwd=cwd, check=True, capture_output=True, text=True
         ).stdout.splitlines()
-        if not staged:
+        if staged:
+            connections.github.git(cwd, token, "commit", "-m", "fleetai: {0}".format(ticket_id))
+        elif token is None:
             raise RuntimeError("nothing staged in {0} for ticket {1}".format(cwd.name, ticket_id))
-        subprocess.run(
-            ["git", "commit", "-m", "fleetai: {0}".format(ticket_id)],
-            cwd=cwd,
-            check=True,
-        )
-        branch = subprocess.run(
-            ["git", "branch", "--show-current"], cwd=cwd, check=True, capture_output=True, text=True
-        ).stdout.strip()
-        if not branch:
-            raise RuntimeError("detached HEAD in {0}; stay on a branch to push".format(cwd.name))
-        subprocess.run(["git", "push", "origin", "HEAD"], cwd=cwd, check=True)
+        if target:
+            connections.github.git(cwd, token, "push", "origin", "HEAD:{0}".format(target))
+            branch = target
+        else:
+            branch = subprocess.run(
+                ["git", "branch", "--show-current"], cwd=cwd, check=True, capture_output=True, text=True
+            ).stdout.strip()
+            if not branch:
+                raise RuntimeError("detached HEAD in {0}; stay on a branch to push".format(cwd.name))
+            connections.github.git(cwd, None, "push", "origin", "HEAD")
         print("{0}\tpushed\t{1}\t{2}".format(ticket_id, cwd.name, branch), flush=True)
 
 

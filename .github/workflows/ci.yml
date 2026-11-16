@@ -81,41 +81,6 @@ jobs:
       - name: Build
         run: npm run build
 
-  deploy-m4:
-    needs: [test, test-frontend]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: [self-hosted, macOS]
-    env:
-      FLEETAI_PRODUCT_ROOT: ${{ vars.FLEETAI_PRODUCT_ROOT }}
-      POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
-      COOKIE_SECURE: "false"
-      SESSION_IDLE_MIN_LIMIT: ${{ vars.SESSION_IDLE_MIN_LIMIT }}
-    steps:
-      - uses: actions/checkout@v4
-      - name: Deploy
-        run: |
-          docker compose down --remove-orphans
-          docker compose up -d --build --remove-orphans
-          docker container prune -f
-          docker image prune -f
-          docker builder prune -f
-      - name: Health
-        run: |
-          check() {
-            local url=$1
-            for i in 1 2 3 4 5 6 7 8 9 10; do
-              if curl -fsS "$url"; then
-                echo
-                return 0
-              fi
-              sleep 2
-            done
-            echo "unhealthy $url" >&2
-            return 1
-          }
-          check http://127.0.0.1:8000/health
-          check http://127.0.0.1:8080/
-
   deploy:
     needs: [test, test-frontend]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -130,6 +95,8 @@ jobs:
       NO_REPLY_EMAIL_ALIAS: ${{ vars.NO_REPLY_EMAIL_ALIAS }}
       SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
       AUTH_SECRET_KEY: ${{ secrets.AUTH_SECRET_KEY }}
+      GITHUB_CLIENT_ID: ${{ secrets.GITHUB_CLIENT_ID }}
+      GITHUB_CLIENT_SECRET: ${{ secrets.GITHUB_CLIENT_SECRET }}
     steps:
       - uses: actions/checkout@v4
       - name: Deploy

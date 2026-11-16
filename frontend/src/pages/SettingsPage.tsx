@@ -4,7 +4,7 @@ import { ApiError, getJson, request } from "../api/client";
 import { AppHeader } from "../components/AppHeader";
 import { AuthenticatorSetup } from "../components/AuthenticatorSetup";
 import { useSession } from "../session";
-import type { Settings } from "../types";
+import type { GithubStatus, Settings } from "../types";
 
 const PERMANENT = "permanent";
 const KEEP_OPTIONS = [
@@ -34,6 +34,10 @@ export function SettingsPage() {
   const [keep, setKeep] = useState("90");
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  const [github, setGithub] = useState<GithubStatus | null>(null);
+  const [project, setProject] = useState("");
+  const [chosen, setChosen] = useState<string[]>([]);
+  const [githubSaved, setGithubSaved] = useState(false);
 
   const show = useCallback((next: Settings) => {
     setSettings(next);
@@ -54,6 +58,13 @@ export function SettingsPage() {
   useEffect(() => {
     if (username) {
       getJson<Settings>("/settings").then(show).catch(fail);
+      getJson<GithubStatus>("/github")
+        .then((next) => {
+          setGithub(next);
+          setProject(next.project || "");
+          setChosen(next.repos.filter((repo) => repo.selected).map((repo) => repo.full_name));
+        })
+        .catch(fail);
     }
   }, [fail, show, username]);
 
@@ -119,6 +130,94 @@ export function SettingsPage() {
             ) : null}
           </section>
         ) : null}
+        <section className="board settings">
+          <div className="board-head">
+            <h2>GitHub</h2>
+          </div>
+          {new URLSearchParams(window.location.search).get("github") === "failed" ? (
+            <p className="form-error">GitHub did not connect. Try again.</p>
+          ) : null}
+          {github == null ? null : !github.configured ? (
+            <p className="muted">GitHub is not configured.</p>
+          ) : !github.connected ? (
+            <>
+              <p className="muted">
+                Connect a GitHub account to clone its repositories and push fixes to fleetai/dev.
+              </p>
+              <button
+                className="btn btn-primary"
+                type="button"
+                onClick={() => window.location.assign("/api/v1/github/connect")}
+              >
+                Connect GitHub
+              </button>
+            </>
+          ) : (
+            <>
+              <p className="muted">Connected as {github.login}. Fixes push to fleetai/dev.</p>
+              <form
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  setGithubSaved(false);
+                  request<GithubStatus>("/github/repos", {
+                    method: "PUT",
+                    body: JSON.stringify({ project, repos: chosen }),
+                  })
+                    .then((next) => {
+                      setGithub(next);
+                      setProject(next.project || "");
+                      setGithubSaved(true);
+                    })
+                    .catch(fail);
+                }}
+              >
+                <label className="field">
+                  Project name
+                  <input
+                    value={project}
+                    maxLength={64}
+                    onChange={(event) => setProject(event.target.value)}
+                  />
+                </label>
+                <div className="repo-list">
+                  {github.repos.map((repo) => (
+                    <label className="accept" key={repo.full_name}>
+                      <input
+                        type="checkbox"
+                        checked={chosen.includes(repo.full_name)}
+                        onChange={(event) => {
+                          setChosen((current) =>
+                            event.target.checked
+                              ? current.concat(repo.full_name)
+                              : current.filter((name) => name !== repo.full_name),
+                          );
+                        }}
+                      />
+                      <span>{repo.full_name}</span>
+                    </label>
+                  ))}
+                </div>
+                <button className="btn btn-primary" type="submit">
+                  Save repositories
+                </button>
+                {githubSaved ? <p className="muted">Saved.</p> : null}
+              </form>
+              <button
+                className="btn"
+                type="button"
+                onClick={() => {
+                  request<void>("/github", { method: "DELETE" })
+                    .then(() =>
+                      setGithub({ configured: true, connected: false, login: null, project: null, repos: [] }),
+                    )
+                    .catch(fail);
+                }}
+              >
+                Disconnect
+              </button>
+            </>
+          )}
+        </section>
         <AuthenticatorSetup onError={fail} />
       </main>
     </>

@@ -12,18 +12,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY pyproject.toml .
 RUN python -c "import pathlib, subprocess, tomllib; subprocess.check_call(['pip', 'install', '--no-cache-dir', *tomllib.loads(pathlib.Path('pyproject.toml').read_text())['project']['dependencies']])"
 
-COPY api.py config.py db.py emails.py intakes.py llm.py orchestrator.py parser.py solver.py verifier.py ./
+COPY api.py config.py connections.py db.py emails.py intakes.py llm.py orchestrator.py parser.py solver.py verifier.py ./
 COPY auth ./auth
 COPY migrations ./migrations
 COPY codebase ./codebase
 
 RUN useradd --create-home --uid 1000 fleetai \
-    && mkdir -p /product \
-    && chown -R fleetai:fleetai /app /product
+    && mkdir -p /product /projects \
+    && chown -R fleetai:fleetai /app /product /projects
 USER fleetai
 
 ENV PYTHONUNBUFFERED=1
 ENV FLEETAI_PRODUCT_ROOT=/product
+ENV FLEETAI_PROJECTS=/projects
 
 EXPOSE 8000
 

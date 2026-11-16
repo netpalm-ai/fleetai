@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import base64
+import secrets
 from contextlib import asynccontextmanager
 from typing import Literal
 
 import config
+import connections
 import db
 import intakes
 import orchestrator
@@ -16,8 +18,9 @@ import verifier
 from auth.deps import get_current_user, require_csrf
 from auth.routes import router as auth_router
 from auth.service import Product, User
-from auth.sessions import start_cleanup
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
+from auth.sessions import cookie_secure, start_cleanup
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 
 FLEETAI = Product(id="fleetai", name="FleetAI", signup_tier="free")
@@ -76,10 +79,16 @@ class SettingsBody(BaseModel):
     ticket_retention_days: Literal[7, 30, 90] | None
 
 
+class GithubReposBody(BaseModel):
+    project: str = ""
+    repos: list[str] = Field(default_factory=list, max_length=100)
+
+
 def _run_job(job: dict, user: User, call) -> None:
     try:
         with config.workflow_lock(user.id, blocking=False):
-            call()
+            with connections.github.checkout_for(user.id):
+                call()
     except config.WorkflowBusy as exc:
         job["status"] = "error"
         job["error"] = str(exc)
@@ -130,6 +139,81 @@ def put_settings(
         raise HTTPException(403, "forbidden")
     intakes.set_keep_days(user.id, body.ticket_retention_days)
     return get_settings(user)
+
+
+def _page(path: str, query: str = "") -> str:
+    base = connections.github.redirect_uri().removesuffix("/api/v1/github/callback") if connections.github.configured() else ""
+    return base + path + query
+
+
+@app.get("/github")
+def get_github(user: User = Depends(require_tickets)) -> dict:
+    try:
+        return connections.github.status(user.id)
+    except RuntimeError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.put("/github/repos")
+def put_github_repos(
+    body: GithubReposBody,
+    user: User = Depends(require_tickets),
+    _: None = Depends(require_csrf),
+) -> dict:
+    try:
+        connections.github.save_repos(user.id, body.project, body.repos)
+        return connections.github.status(user.id)
+    except RuntimeError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.delete("/github", status_code=204, response_model=None)
+def delete_github(user: User = Depends(require_tickets), _: None = Depends(require_csrf)) -> None:
+    connections.github.disconnect(user.id)
+
+
+@app.get("/github/connect")
+def start_github_connect(user: User = Depends(require_tickets)) -> RedirectResponse:
+    if not connections.github.configured():
+        raise HTTPException(503, "GitHub is not configured")
+    state = secrets.token_urlsafe(32)
+    response = RedirectResponse(connections.github.authorize_url(state), status_code=302)
+    response.set_cookie(
+        connections.github.STATE_COOKIE,
+        state,
+        max_age=600,
+        httponly=True,
+        samesite="lax",
+        path="/",
+        secure=cookie_secure(),
+    )
+    return response
+
+
+@app.get("/github/callback")
+def github_callback(request: Request, code: str = "", state: str = "", error: str = "") -> RedirectResponse:
+    def finish(response: RedirectResponse) -> RedirectResponse:
+        response.delete_cookie(connections.github.STATE_COOKIE, path="/")
+        return response
+
+    failed = finish(RedirectResponse(_page("/settings", "?github=failed"), status_code=302))
+    if error or not code:
+        return failed
+    saved = request.cookies.get(connections.github.STATE_COOKIE) or ""
+    if not saved or not secrets.compare_digest(saved, state):
+        return failed
+    try:
+        user = get_current_user(request)
+    except HTTPException:
+        return finish(RedirectResponse(_page("/login"), status_code=302))
+    if TICKETS_FEATURE not in user.features:
+        raise HTTPException(403, "forbidden")
+    try:
+        token, login = connections.github.exchange_code(code)
+        connections.github.save_connection(user.id, login, token)
+    except RuntimeError:
+        return failed
+    return finish(RedirectResponse(_page("/settings", "?github=connected"), status_code=302))
 
 
 @app.get("/tickets")

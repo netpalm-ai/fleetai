@@ -154,7 +154,9 @@ Solve and verify:
 - `CURSOR_API_KEY` — GitHub Actions secret. Not stored in `.env`. GitHub will
   not return that value to a local script. Actions inject
   `${{ secrets.CURSOR_API_KEY }}`.
-- `FLEETAI_PRODUCT_ROOT`, the directory that contains the product checkouts
+- `FLEETAI_PRODUCT_ROOT`, the directory the agent uses when GitHub is not connected.
+- `FLEETAI_PROJECTS`, where a connected account is cloned: `<user id>/<project name>/<repo>`. Fixes push to `fleetai/dev`. Compose keeps this on the `projects` volume.
+- `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` — GitHub OAuth app, as Actions secrets. The callback is `{PRODUCT_PUBLIC_BASE_URL}/api/v1/github/callback` and the scope is `repo`.
 - `FLEETAI_CURSOR_MODEL`, `FLEETAI_CURSOR_REASONING`, `FLEETAI_CURSOR_FAST`
 
 `.env` is empty. Non-secret config is GitHub Actions variables on `ngtminh/fleetai`. Secrets are Actions secrets only:
@@ -162,8 +164,10 @@ Solve and verify:
 - `CURSOR_API_KEY`
 - `AWS_BEARER_TOKEN_BEDROCK`
 - `POSTGRES_PASSWORD`
+- `GITHUB_CLIENT_ID`
+- `GITHUB_CLIENT_SECRET`
 
-CI reads `${{ vars.* }}` and `${{ secrets.* }}`. Ubuntu runs backend pytest and a frontend production build. A push to `main` then deploys both services on the self-hosted macOS runner: `docker compose down`, `up --build`, prune stopped containers and dangling images (not volumes), then `GET /health` on `127.0.0.1:8000` and `GET /` on `127.0.0.1:8080`.
+CI reads `${{ vars.* }}` and `${{ secrets.* }}`. Ubuntu runs backend pytest and a frontend production build. A push to `main`, including a merge, deploys on the FleetAI server: the self-hosted i9 runner copies the repo to `/home/deploy/fleetai`, runs `docker compose down` and `up --build`, prunes stopped containers and dangling images (not volumes), then checks `GET /health` on `127.0.0.1:8000` and `GET /` on `127.0.0.1:8080`.
 
 ## Docker
 

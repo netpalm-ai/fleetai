@@ -241,6 +241,20 @@ class TicketStorageTests(unittest.TestCase):
         self.assertEqual(intakes.find_ticket(self.user_id, "T1")["status"], "fixed")
         push.assert_called_once()
 
+    def test_a_failed_push_leaves_the_ticket_verifying(self) -> None:
+        intakes.sync_tickets(self.user_id, None, [_ticket("T1")])
+        replies = [
+            SimpleNamespace(id="s1", result="CHANGED FILES:\napi/login.py\nVERDICT: ready"),
+            SimpleNamespace(id="v1", result="ok\nCHANGED FILES:\napi/login.py\nVERDICT: fixed"),
+        ]
+        with patch("llm.cursor.run", side_effect=replies), patch(
+            "verifier.push_ticket", side_effect=RuntimeError("push rejected")
+        ):
+            with self.assertRaisesRegex(RuntimeError, "push rejected"):
+                solver.solve(self.user_id, "T1")
+                verifier.verify(self.user_id, "T1")
+        self.assertEqual(intakes.find_ticket(self.user_id, "T1")["status"], "verifying")
+
     def test_verifier_pushes_without_a_recheck_when_files_match(self) -> None:
         intakes.sync_tickets(self.user_id, None, [_ticket("T1")])
         replies = [
