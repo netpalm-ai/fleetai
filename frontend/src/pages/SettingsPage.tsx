@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
-import { Navigate } from "react-router-dom";
+import { Navigate, useSearchParams } from "react-router-dom";
 import { ApiError, getJson, request } from "../api/client";
 import { AppHeader } from "../components/AppHeader";
 import { GithubMark } from "../components/GithubMark";
@@ -31,6 +31,8 @@ function keepText(days: number | null): string {
 
 export function SettingsPage() {
   const { username, ready, expire } = useSession();
+  const [params, setParams] = useSearchParams();
+  const connectors = params.get("tab") === "connectors" || params.has("github");
   const [settings, setSettings] = useState<Settings | null>(null);
   const [keep, setKeep] = useState("90");
   const [error, setError] = useState<string | null>(null);
@@ -99,12 +101,32 @@ export function SettingsPage() {
       <main className="shell shell-wide">
         <div className="page-head">
           <div>
-            <p className="eyebrow">Account</p>
+            <p className="eyebrow">{connectors ? "Connectors" : "Account"}</p>
             <h1>Settings</h1>
           </div>
         </div>
+        <div className="seg settings-tabs" role="tablist">
+          <button
+            className={connectors ? "seg-btn" : "seg-btn on"}
+            type="button"
+            role="tab"
+            aria-selected={!connectors}
+            onClick={() => setParams({})}
+          >
+            Account
+          </button>
+          <button
+            className={connectors ? "seg-btn on" : "seg-btn"}
+            type="button"
+            role="tab"
+            aria-selected={connectors}
+            onClick={() => setParams({ tab: "connectors" })}
+          >
+            Connectors
+          </button>
+        </div>
         {error ? <p className="form-error studio-error">{error}</p> : null}
-        {settings ? (
+        {connectors ? null : settings ? (
           <section className="board settings">
             <div className="board-head">
               <h2>Ticket history</h2>
@@ -131,45 +153,44 @@ export function SettingsPage() {
             ) : null}
           </section>
         ) : null}
-        <section className="board settings" id="github">
-          <div className="board-head">
-            <h2 className="with-icon">
-              <GithubMark />
-              GitHub
-            </h2>
-          </div>
-          {new URLSearchParams(window.location.search).get("github") === "failed" ? (
-            <p className="form-error">GitHub did not connect. Try again.</p>
-          ) : null}
-          {github == null ? null : !github.connected ? (
-            <>
-              <p className="muted">
-                Connect a GitHub account to clone its repositories and push fixes to fleetai/dev.
-              </p>
-              {github.configured ? null : <p className="muted">GitHub is not configured.</p>}
-              <button
-                className="btn btn-primary btn-block with-icon"
-                type="button"
-                onClick={() => {
-                  if (!github.configured) {
-                    fail(new Error("GitHub is not configured."));
-                    return;
-                  }
-                  window.location.assign("/api/v1/github/connect");
-                }}
-              >
+        {connectors ? (
+          <section className="board settings" id="connectors">
+            <div className="board-head">
+              <h2 className="with-icon">
                 <GithubMark />
-                Connect GitHub
-              </button>
-            </>
-          ) : (
-            <>
-              <p className="muted with-icon">
-                <GithubMark />
-                Connected as {github.login}. Fixes push to fleetai/dev.
-              </p>
-              <form
-                onSubmit={(event) => {
+                GitHub
+              </h2>
+            </div>
+            {params.get("github") === "failed" ? (
+              <p className="form-error">GitHub did not connect. Try again.</p>
+            ) : null}
+            {github == null ? null : !github.connected ? (
+              <>
+                <p className="muted">Connect GitHub so FleetAI can use the repositories you choose.</p>
+                <button
+                  className="btn btn-primary btn-block with-icon"
+                  type="button"
+                  onClick={() => {
+                    if (!github.configured) {
+                      fail(new Error("GitHub could not be connected. Try again later."));
+                      return;
+                    }
+                    window.location.assign("/api/v1/github/connect");
+                  }}
+                >
+                  <GithubMark />
+                  Connect GitHub
+                </button>
+              </>
+            ) : (
+              <>
+                <p className="muted with-icon">
+                  <GithubMark />
+                  Connected as {github.login}.
+                </p>
+                <p className="muted">Choose the repositories FleetAI should use.</p>
+                <form
+                  onSubmit={(event) => {
                   event.preventDefault();
                   setGithubSaved(false);
                   request<GithubStatus>("/github/repos", {
@@ -231,7 +252,9 @@ export function SettingsPage() {
             </>
           )}
         </section>
-        <AuthenticatorSetup onError={fail} />
+        ) : (
+          <AuthenticatorSetup onError={fail} />
+        )}
       </main>
     </>
   );

@@ -27,7 +27,7 @@ export function AppHeader() {
         </Link>
         <div className="nav-end">
           {github == null ? null : github.connected ? (
-            <Link to="/settings#github" className="btn btn-ghost with-icon">
+            <Link to="/settings?tab=connectors" className="btn btn-ghost with-icon">
               <GithubMark />
               {github.login}
             </Link>
@@ -40,7 +40,7 @@ export function AppHeader() {
                   window.location.assign("/api/v1/github/connect");
                   return;
                 }
-                window.location.assign("/settings#github");
+                window.location.assign("/settings?tab=connectors");
               }}
             >
               <GithubMark />

@@ -1,0 +1,118 @@
+name: frontend
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "frontend/**"
+      - "docker-compose.yml"
+      - ".github/workflows/frontend.yml"
+  pull_request:
+    paths:
+      - "frontend/**"
+      - "docker-compose.yml"
+      - ".github/workflows/frontend.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION }}
+  AWS_BEARER_TOKEN_BEDROCK: ${{ secrets.AWS_BEARER_TOKEN_BEDROCK }}
+  BEDROCK_MODEL_ID: ${{ vars.BEDROCK_MODEL_ID }}
+  CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
+  FLEETAI_BEDROCK_CONNECT_TIMEOUT: ${{ vars.FLEETAI_BEDROCK_CONNECT_TIMEOUT }}
+  FLEETAI_BEDROCK_MAX_TOKENS: ${{ vars.FLEETAI_BEDROCK_MAX_TOKENS }}
+  FLEETAI_BEDROCK_TIMEOUT: ${{ vars.FLEETAI_BEDROCK_TIMEOUT }}
+  FLEETAI_CURSOR_FAST: ${{ vars.FLEETAI_CURSOR_FAST }}
+  FLEETAI_CURSOR_MODEL: ${{ vars.FLEETAI_CURSOR_MODEL }}
+  FLEETAI_CURSOR_REASONING: ${{ vars.FLEETAI_CURSOR_REASONING }}
+  FLEETAI_OLLAMA_CONTEXT_WINDOW: ${{ vars.FLEETAI_OLLAMA_CONTEXT_WINDOW }}
+  FLEETAI_OLLAMA_MAX_TOKENS: ${{ vars.FLEETAI_OLLAMA_MAX_TOKENS }}
+  FLEETAI_OLLAMA_TIMEOUT: ${{ vars.FLEETAI_OLLAMA_TIMEOUT }}
+  FLEETAI_SUMMARY_LIMIT: ${{ vars.FLEETAI_SUMMARY_LIMIT }}
+  FLEETAI_SUMMARY_MODEL: ${{ vars.FLEETAI_SUMMARY_MODEL }}
+  OLLAMA_HOST: ${{ vars.OLLAMA_HOST }}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install
+        run: npm ci
+      - name: Build
+        run: npm run build
+
+  deploy:
+    needs: [test]
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: [self-hosted, Linux, i9]
+    concurrency:
+      group: fleetai-i9
+      cancel-in-progress: false
+    env:
+      FLEETAI_PRODUCT_ROOT: /home/minh/repos/hba
+      OLLAMA_HOST: http://host.docker.internal:11434
+      COOKIE_SECURE: "true"
+      SESSION_IDLE_MIN_LIMIT: ${{ vars.SESSION_IDLE_MIN_LIMIT }}
+      PRODUCT_PUBLIC_BASE_URL: ${{ vars.PRODUCT_PUBLIC_BASE_URL }}
+      SMTP_EMAIL_USER: ${{ vars.SMTP_EMAIL_USER }}
+      NO_REPLY_EMAIL_ALIAS: ${{ vars.NO_REPLY_EMAIL_ALIAS }}
+      SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+      AUTH_SECRET_KEY: ${{ secrets.AUTH_SECRET_KEY }}
+      GITHUB_CLIENT_ID: ${{ secrets.APP_CLIENT_ID }}
+      GITHUB_CLIENT_SECRET: ${{ secrets.APP_CLIENT_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy
+        run: |
+          mkdir -p /home/deploy/fleetai
+          rsync -a --delete \
+            --exclude .git/ \
+            --exclude .env \
+            --exclude frontend/node_modules/ \
+            --exclude frontend/dist/ \
+            ./ /home/deploy/fleetai/
+          cd /home/deploy/fleetai
+          case "${GITHUB_REF}" in
+            refs/heads/main) ENV_NAME=prod ;;
+            *) echo "unsupported branch ${GITHUB_REF}" >&2; exit 1 ;;
+          esac
+          TAG="${GITHUB_SHA:0:6}"
+          test "${#TAG}" -eq 6
+          export BACKEND_IMAGE="flai-${ENV_NAME}-be-global:${TAG}"
+          export FRONTEND_IMAGE="flai-${ENV_NAME}-fe-global:${TAG}"
+          echo "frontend ${FRONTEND_IMAGE}"
+          docker compose up -d --no-deps --build frontend
+          docker image rm fleetai-frontend:0.1.0 || true
+          docker image ls --format '{{.Repository}}:{{.Tag}}' \
+            | grep "^flai-${ENV_NAME}-fe-global:" \
+            | grep -v ":${TAG}$" \
+            | xargs -r docker image rm || true
+          docker container prune -f
+          docker image prune -f
+      - name: Health
+        run: |
+          check() {
+            local url=$1
+            for i in 1 2 3 4 5 6 7 8 9 10; do
+              if curl -fsS "$url"; then
+                echo
+                return 0
+              fi
+              sleep 2
+            done
+            echo "unhealthy $url" >&2
+            return 1
+          }
+          check http://127.0.0.1:8080/

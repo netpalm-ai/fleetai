@@ -530,6 +530,10 @@ h3 {
   margin: 10px 0 8px;
 }
 
+.settings-tabs {
+  margin: 0 0 22px;
+}
+
 .seg-btn {
   position: relative;
   display: inline-flex;

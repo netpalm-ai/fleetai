@@ -39,9 +39,10 @@ textarea, optional project.md context, then **Resolve tickets**. That posts
 `/api/v1/tickets/inputs` then `/api/v1/execute`, polls `/api/v1/jobs/{id}`, and
 lists tickets from `GET /api/v1/tickets`. No marketing hero.
 
-`/settings` is the account page. It shows how long handled tickets are kept
-(`GET /api/v1/settings`). Only a paid user can change it, as a number of days
-or keep forever (`PUT /api/v1/settings`).
+`/settings` has Account and Connectors tabs. Account shows how long handled
+tickets are kept (`GET /api/v1/settings`). Only a paid user can change it, as a
+number of days or keep forever (`PUT /api/v1/settings`). Connectors is where a
+customer connects GitHub. Do not mention branches, clones, or server setup there.
 
 ## Layout
 
@@ -79,6 +80,7 @@ same dialog. Routes: `/` intro, `/login`, `/signup`,
 ## Backend
 
 Browser calls go through `/api/v1/...`. `v1` is a URL prefix, not a directory.
-Vite (dev) and nginx (Compose) strip `/api/v1` and proxy to the backend on
-`127.0.0.1:8000` (`/health`, `/auth`, `/tickets`). Types must match
-`backend/api.py`. No invented API routes.
+Vite (dev) strips `/api/v1` and proxies to `127.0.0.1:8000`. The frontend
+image strips `/api/v1` and proxies to the `backend` service. A push that only
+changes `frontend/` deploys that image and leaves the API running. Types must
+match `backend/api.py`. No invented API routes.

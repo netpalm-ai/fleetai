@@ -3,7 +3,15 @@ name: ci
 on:
   push:
     branches: [main]
+    paths:
+      - "backend/**"
+      - "docker-compose.yml"
+      - ".github/workflows/ci.yml"
   pull_request:
+    paths:
+      - "backend/**"
+      - "docker-compose.yml"
+      - ".github/workflows/ci.yml"
 
 permissions:
   contents: read
@@ -64,27 +72,13 @@ jobs:
           mkdir -p /tmp/product
           python -c "from llm import bedrock; print(bedrock.complete('Say hello in one word.'))"
 
-  test-frontend:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: frontend
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-      - name: Install
-        run: npm ci
-      - name: Build
-        run: npm run build
-
   deploy:
-    needs: [test, test-frontend]
+    needs: [test]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: [self-hosted, Linux, i9]
+    concurrency:
+      group: fleetai-i9
+      cancel-in-progress: false
     env:
       FLEETAI_PRODUCT_ROOT: /home/minh/repos/hba
       OLLAMA_HOST: http://host.docker.internal:11434
@@ -95,8 +89,8 @@ jobs:
       NO_REPLY_EMAIL_ALIAS: ${{ vars.NO_REPLY_EMAIL_ALIAS }}
       SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
       AUTH_SECRET_KEY: ${{ secrets.AUTH_SECRET_KEY }}
-      GITHUB_CLIENT_ID: ${{ secrets.GITHUB_CLIENT_ID }}
-      GITHUB_CLIENT_SECRET: ${{ secrets.GITHUB_CLIENT_SECRET }}
+      GITHUB_CLIENT_ID: ${{ secrets.APP_CLIENT_ID }}
+      GITHUB_CLIENT_SECRET: ${{ secrets.APP_CLIENT_SECRET }}
     steps:
       - uses: actions/checkout@v4
       - name: Deploy
@@ -109,8 +103,21 @@ jobs:
             --exclude frontend/dist/ \
             ./ /home/deploy/fleetai/
           cd /home/deploy/fleetai
-          docker compose down --remove-orphans
-          docker compose up -d --build --remove-orphans
+          case "${GITHUB_REF}" in
+            refs/heads/main) ENV_NAME=prod ;;
+            *) echo "unsupported branch ${GITHUB_REF}" >&2; exit 1 ;;
+          esac
+          TAG="${GITHUB_SHA:0:6}"
+          test "${#TAG}" -eq 6
+          export BACKEND_IMAGE="flai-${ENV_NAME}-be-global:${TAG}"
+          export FRONTEND_IMAGE="flai-${ENV_NAME}-fe-global:${TAG}"
+          echo "backend ${BACKEND_IMAGE}"
+          docker compose up -d --build --remove-orphans postgres backend
+          docker image rm fleetai-backend:0.1.0 || true
+          docker image ls --format '{{.Repository}}:{{.Tag}}' \
+            | grep "^flai-${ENV_NAME}-be-global:" \
+            | grep -v ":${TAG}$" \
+            | xargs -r docker image rm || true
           docker container prune -f
           docker image prune -f
       - name: Health
@@ -128,4 +135,3 @@ jobs:
             return 1
           }
           check http://127.0.0.1:8000/health
-          check http://127.0.0.1:8080/
