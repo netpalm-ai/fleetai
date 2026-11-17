@@ -3,6 +3,16 @@ import { Link, useSearchParams } from "react-router-dom";
 import { ApiError, request } from "../api/client";
 import { BrandMark } from "../components/BrandMark";
 
+const MIN_PASSWORD = 12;
+const MAX_PASSWORD = 128;
+const PASSWORD_RULE = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).{12,128}$/;
+const PASSWORD_RULE_TEXT =
+  "Use 12 to 128 characters with an uppercase letter, a lowercase letter, a number, and a symbol.";
+
+function acceptablePassword(password: string): boolean {
+  return password.length >= MIN_PASSWORD && password.length <= MAX_PASSWORD && PASSWORD_RULE.test(password);
+}
+
 export function ResetPasswordPage() {
   const [params] = useSearchParams();
   const token = (params.get("token") ?? "").trim();
@@ -11,7 +21,21 @@ export function ResetPasswordPage() {
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const password = String(new FormData(event.currentTarget).get("password") ?? "");
+    const form = new FormData(event.currentTarget);
+    const password = String(form.get("password") ?? "");
+    const confirm = String(form.get("confirm") ?? "");
+    if (!password || !confirm) {
+      setError("Enter and confirm a password.");
+      return;
+    }
+    if (password !== confirm) {
+      setError("Passwords do not match.");
+      return;
+    }
+    if (!acceptablePassword(password)) {
+      setError(PASSWORD_RULE_TEXT);
+      return;
+    }
     setError(null);
     try {
       await request<void>("/auth/password/reset", {
@@ -21,7 +45,7 @@ export function ResetPasswordPage() {
       setDone(true);
     } catch (err: unknown) {
       if (err instanceof ApiError && err.status === 422) {
-        setError("Password must be 10 to 128 characters.");
+        setError(PASSWORD_RULE_TEXT);
       } else if (err instanceof ApiError && err.status === 400) {
         setError("This reset link is invalid or expired.");
       } else {
@@ -40,7 +64,25 @@ export function ResetPasswordPage() {
           <>
             <label className="field">
               New password
-              <input name="password" type="password" autoComplete="new-password" autoFocus />
+              <input
+                name="password"
+                type="password"
+                autoComplete="new-password"
+                minLength={MIN_PASSWORD}
+                maxLength={MAX_PASSWORD}
+                autoFocus
+              />
+            </label>
+            <p className="muted">{PASSWORD_RULE_TEXT}</p>
+            <label className="field">
+              Confirm password
+              <input
+                name="confirm"
+                type="password"
+                autoComplete="new-password"
+                minLength={MIN_PASSWORD}
+                maxLength={MAX_PASSWORD}
+              />
             </label>
             <button className="btn btn-primary btn-block" type="submit">
               Change password

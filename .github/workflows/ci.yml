@@ -113,7 +113,6 @@ jobs:
           docker compose up -d --build --remove-orphans
           docker container prune -f
           docker image prune -f
-          docker builder prune -f
       - name: Health
         run: |
           check() {

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { Navigate } from "react-router-dom";
 import { ApiError, getJson, request } from "../api/client";
 import { AppHeader } from "../components/AppHeader";
+import { GithubMark } from "../components/GithubMark";
 import { AuthenticatorSetup } from "../components/AuthenticatorSetup";
 import { useSession } from "../session";
 import type { GithubStatus, Settings } from "../types";
@@ -130,31 +131,43 @@ export function SettingsPage() {
             ) : null}
           </section>
         ) : null}
-        <section className="board settings">
+        <section className="board settings" id="github">
           <div className="board-head">
-            <h2>GitHub</h2>
+            <h2 className="with-icon">
+              <GithubMark />
+              GitHub
+            </h2>
           </div>
           {new URLSearchParams(window.location.search).get("github") === "failed" ? (
             <p className="form-error">GitHub did not connect. Try again.</p>
           ) : null}
-          {github == null ? null : !github.configured ? (
-            <p className="muted">GitHub is not configured.</p>
-          ) : !github.connected ? (
+          {github == null ? null : !github.connected ? (
             <>
               <p className="muted">
                 Connect a GitHub account to clone its repositories and push fixes to fleetai/dev.
               </p>
+              {github.configured ? null : <p className="muted">GitHub is not configured.</p>}
               <button
-                className="btn btn-primary"
+                className="btn btn-primary btn-block with-icon"
                 type="button"
-                onClick={() => window.location.assign("/api/v1/github/connect")}
+                onClick={() => {
+                  if (!github.configured) {
+                    fail(new Error("GitHub is not configured."));
+                    return;
+                  }
+                  window.location.assign("/api/v1/github/connect");
+                }}
               >
+                <GithubMark />
                 Connect GitHub
               </button>
             </>
           ) : (
             <>
-              <p className="muted">Connected as {github.login}. Fixes push to fleetai/dev.</p>
+              <p className="muted with-icon">
+                <GithubMark />
+                Connected as {github.login}. Fixes push to fleetai/dev.
+              </p>
               <form
                 onSubmit={(event) => {
                   event.preventDefault();
@@ -197,13 +210,13 @@ export function SettingsPage() {
                     </label>
                   ))}
                 </div>
-                <button className="btn btn-primary" type="submit">
+                <button className="btn btn-primary btn-block" type="submit">
                   Save repositories
                 </button>
                 {githubSaved ? <p className="muted">Saved.</p> : null}
               </form>
               <button
-                className="btn"
+                className="btn btn-ghost btn-block"
                 type="button"
                 onClick={() => {
                   request<void>("/github", { method: "DELETE" })

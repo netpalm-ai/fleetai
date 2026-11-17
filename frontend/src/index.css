@@ -667,6 +667,23 @@ h3 {
   margin: 14px 0 0;
 }
 
+.with-icon {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.github-mark {
+  width: 16px;
+  height: 16px;
+  flex: none;
+}
+
+h2 .github-mark {
+  width: 22px;
+  height: 22px;
+}
+
 .btn-block {
   width: 100%;
   margin-top: 22px;
