@@ -23,8 +23,8 @@ import orchestrator
 import parser
 import solver
 import verifier
-from auth.service import issue_verify_token
 from auth.sessions import COOKIE_NAME
+from tests.signing import register_verify_login
 
 CSRF = {"X-Requested-With": "fleetai"}
 EMAIL = "ada@example.com"
@@ -61,24 +61,9 @@ class TicketStorageTests(unittest.TestCase):
         with db.get_pool().connection() as conn:
             conn.execute("TRUNCATE users CASCADE")
             conn.commit()
-        created = self.client.post(
-            "/auth/register",
-            json={
-                "username": "ada",
-                "email": EMAIL,
-                "first_name": "Ada",
-                "last_name": "Lovelace",
-                "password": PASSWORD,
-                "tos_accepted": True,
-            },
-            headers=CSRF,
+        self.user_id = register_verify_login(
+            self.client, email=EMAIL, password=PASSWORD, username="ada"
         )
-        self.assertEqual(created.status_code, 201)
-        self.user_id = UUID(created.json()["id"])
-        token = issue_verify_token(self.user_id)
-        self.client.post("/auth/verify", json={"token": token}, headers=CSRF)
-        logged = self.client.post("/auth/login", json={"email": EMAIL, "password": PASSWORD}, headers=CSRF)
-        self.assertEqual(logged.status_code, 200)
         self.assertIn(COOKIE_NAME, self.client.cookies)
 
     def tearDown(self) -> None:
