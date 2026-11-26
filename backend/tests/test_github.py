@@ -208,13 +208,24 @@ class GithubConnectTests(unittest.TestCase):
         self.assertEqual(calls[0], ("FleetAI", ("clone", "--origin", "origin", "--", "https://github.com/netpalm-ai/fleetai.git", "fleetai")))
         self.assertEqual(calls[-1][1], ("checkout", "-B", "fleetai/dev", "origin/fleetai/dev"))
 
-    def test_fleetai_clone_requires_github(self) -> None:
+    def test_fleetai_clone_does_not_require_github(self) -> None:
         with db.get_pool().connection() as conn:
             project_id = connections.upsert_project(conn, self.user_id, "FleetAI")
             conn.commit()
-        with self.assertRaises(RuntimeError) as raised:
-            connections.github.prepare(self.user_id, project_id)
-        self.assertEqual(str(raised.exception), "GitHub is not connected")
+        calls: list[tuple] = []
+
+        def fake_git(cwd, token, *args):
+            calls.append((token, args))
+            if args[-1:] == ("refs/heads/fleetai/dev",):
+                raise RuntimeError("missing")
+            return ""
+
+        with TemporaryDirectory() as raw:
+            with patch.dict(os.environ, {"FLEETAI_PROJECTS": raw}), patch.object(connections.github, "git", side_effect=fake_git):
+                checkout = connections.github.prepare(self.user_id, project_id)
+        self.assertIsNone(checkout.token)
+        self.assertIsNone(calls[0][0])
+        self.assertIn("https://github.com/netpalm-ai/fleetai.git", calls[0][1])
 
     def test_rejected_github_token_retries_without_it(self) -> None:
         calls: list[list[str]] = []

@@ -312,8 +312,10 @@ class GithubConnection:
                 raise RuntimeError("name the project in Settings")
             if not repos:
                 return None
-            if found is None:
+            catalog = set(CATALOG_REPOS.get(project, ()))
+            if found is None and any(repo not in catalog for repo in repos):
                 raise RuntimeError("GitHub is not connected")
+        token = found.token if found is not None else None
         root = config.projects_root() / str(user_id) / project
         root.mkdir(parents=True, exist_ok=True)
         seen: set[str] = set()
@@ -328,11 +330,11 @@ class GithubConnection:
             dest = root / name
             remote = "https://github.com/{0}.git".format(full_name)
             if not (dest / ".git").is_dir():
-                self.git(root, found.token, "clone", "--origin", "origin", "--", remote, name)
+                self.git(root, token, "clone", "--origin", "origin", "--", remote, name)
             else:
-                self.git(dest, found.token, "fetch", "--prune", "origin")
-            self._checkout_work_branch(dest, found.token)
-        return config.Checkout(root=root, token=found.token, branch=self.WORK_BRANCH)
+                self.git(dest, token, "fetch", "--prune", "origin")
+            self._checkout_work_branch(dest, token)
+        return config.Checkout(root=root, token=token, branch=self.WORK_BRANCH)
 
     @contextmanager
     def checkout_for(self, user_id: UUID, project_id: UUID | None = None):
