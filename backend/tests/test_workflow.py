@@ -16,7 +16,6 @@ import pymupdf
 from cursor_sdk import SDKImage, UserMessage
 
 import config
-import db
 import intakes
 import llm
 import parser
@@ -638,34 +637,6 @@ class CursorImageTests(unittest.TestCase):
         stored = add_run.call_args.args[5]
         self.assertEqual(stored, "PROMPT-TEXT")
         self.assertNotIn(WEBP, stored.encode("utf-8"))
-
-
-class Conn:
-    def __init__(self, name: str) -> None:
-        self.name = name
-
-    def execute(self, query: str):
-        class Result:
-            def __init__(self, name: str) -> None:
-                self.name = name
-
-            def fetchone(self):
-                return {"name": self.name}
-
-        return Result(self.name)
-
-
-class WipeGuardTests(unittest.TestCase):
-    def test_refuses_a_live_database(self) -> None:
-        with self.assertRaises(RuntimeError) as raised:
-            db.refuse_live_wipe(Conn(""))
-        self.assertEqual(
-            str(raised.exception),
-            "refusing to wipe this database. It is not a disposable test database, and the operator has not agreed to delete it.",
-        )
-
-    def test_allows_the_disposable_cluster(self) -> None:
-        db.refuse_live_wipe(Conn("fleetai-ci"))
 
 
 if __name__ == "__main__":

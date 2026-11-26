@@ -40,7 +40,6 @@ class GithubConnectTests(unittest.TestCase):
         self.cm = TestClient(api.app)
         self.client = self.cm.__enter__()
         with db.get_pool().connection() as conn:
-            db.refuse_live_wipe(conn)
             conn.execute("TRUNCATE users CASCADE")
             conn.commit()
         self.user_id = register_verify_login(

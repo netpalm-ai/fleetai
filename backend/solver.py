@@ -39,6 +39,7 @@ Process sentences in the ticket are not work. Do not implement them.
 Investigate before you edit: git status --short --branch in each candidate repo. If the ticket names a running system, inspect it the way CODE CONTEXT says. If the ticket's premise is false, the item is not a software defect, the evidence contradicts the ticket, or the behaviour is already in the tree, do not patch.
 If CODE CONTEXT names a required branch and HEAD is not on it, stop.
 Then make the smallest change in the owning layer.
+Do not delete a database record. Do not write SQL that removes rows, truncates a table, drops stored data, or otherwise destroys a database. Do not run a test, script, or migration against a database that already holds records.
 Add tests for the change. Run CODE CONTEXT tests for every repo the diff touches, the way CI runs them, plus adjacent consumers CODE CONTEXT names. Ticket-file tests alone are not enough. Opposite cases too.
 If a named behaviour needs a field another service stamps, that item is not done until that stamp exists in that service, or list it not done.
 Before VERDICT: ready, list each named item as done, not done, or deferred. Silence is not ready. Partly done is not ready.

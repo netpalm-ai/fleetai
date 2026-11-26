@@ -9,6 +9,12 @@ These rules apply to every product. CODE CONTEXT may tighten them. It may not re
 - No TODOs, placeholders, commented-out code, unused imports, invented APIs, or invented business rules.
 - Do not change CI, deploy, auth, secrets, schema, or model settings unless the ticket and the operator both named that work.
 
+## Database
+
+- Do not delete a database record.
+- Do not write SQL that removes rows, truncates a table, drops stored data, or otherwise destroys a database.
+- Do not run a test, script, or migration against a database that already holds records.
+
 ## Layers
 
 - Put domain meaning, write policy, conflict policy, and official reason-copy in the service that already stamps those fields.
