@@ -1,6 +1,6 @@
-export function BrandMark({ large = false }: { large?: boolean }) {
+export function BrandMark() {
   return (
-    <span className={large ? "brand brand-large" : "brand"}>
+    <span className="brand">
       Fleet<span>AI</span>
     </span>
   );

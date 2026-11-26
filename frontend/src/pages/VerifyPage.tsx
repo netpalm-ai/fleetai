@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { request } from "../api/client";
-import { BrandMark } from "../components/BrandMark";
 
 export function VerifyPage() {
   const [params] = useSearchParams();
@@ -25,7 +24,6 @@ export function VerifyPage() {
   return (
     <div className="auth">
       <div className="auth-card">
-        <BrandMark large />
         <h1>Verify email</h1>
         {status === "wait" ? <p className="muted">Confirming your email…</p> : null}
         {status === "ok" ? <p>Email verified. You can sign in.</p> : null}

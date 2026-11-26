@@ -1,6 +1,5 @@
 import { FormEvent, useRef, useState } from "react";
 import { Link, Navigate } from "react-router-dom";
-import { BrandMark } from "../components/BrandMark";
 import {
   CODE_REJECTED,
   CODE_REQUIRED,
@@ -30,7 +29,6 @@ export function LoginPage() {
     return (
       <div className="auth">
         <div className="auth-card">
-          <BrandMark large />
           <p className="muted">Loading…</p>
         </div>
       </div>
@@ -112,7 +110,6 @@ export function LoginPage() {
   return (
     <div className="auth">
       <div className="auth-card">
-        <BrandMark large />
         <h1>Sign in</h1>
         <form onSubmit={(event) => void onSubmit(event)} noValidate>
           <label className="field">

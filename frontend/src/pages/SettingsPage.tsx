@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { Navigate, useLocation, useSearchParams } from "react-router-dom";
 import { getJson, request, requestError } from "../api/client";
-import { AppShell } from "../components/AppShell";
 import { GithubMark } from "../components/GithubMark";
 import { AuthenticatorSetup } from "../components/AuthenticatorSetup";
 import { useSession } from "../session";
@@ -133,7 +132,6 @@ export function SettingsPage() {
   }
 
   return (
-    <AppShell>
       <main className="shell shell-app">
         <div className="page-head">
           <div>
@@ -328,6 +326,5 @@ export function SettingsPage() {
           </>
         )}
       </main>
-    </AppShell>
   );
 }

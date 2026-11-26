@@ -5,7 +5,7 @@ from __future__ import annotations
 import base64
 import secrets
 from contextlib import asynccontextmanager
-from typing import Literal
+from typing import Annotated, Literal
 from uuid import UUID
 
 import config
@@ -72,6 +72,7 @@ class IntakeBody(BaseModel):
     list_text: str = Field(default="", max_length=524288)
     context: str = Field(default="", max_length=524288)
     list_pdf_base64: str | None = Field(default=None, max_length=70_000_000)
+    list_images_base64: list[Annotated[str, Field(max_length=7_000_000)]] = Field(default_factory=list, max_length=8)
 
 
 class SettingsBody(BaseModel):
@@ -236,8 +237,14 @@ def post_inputs(body: IntakeBody, user: User = Depends(require_tickets)) -> None
             pdf = base64.b64decode(body.list_pdf_base64, validate=True)
         except Exception as exc:
             raise HTTPException(422, "invalid") from exc
+    images = []
+    for raw in body.list_images_base64:
+        try:
+            images.append(base64.b64decode(raw, validate=True))
+        except Exception as exc:
+            raise HTTPException(422, "invalid") from exc
     try:
-        config.save_intake(body.email, body.list_text, body.context, pdf, user.id, user.session_id)
+        config.save_intake(body.email, body.list_text, body.context, pdf, user.id, user.session_id, images)
     except config.WorkflowBusy:
         _busy()
     except RuntimeError as exc:

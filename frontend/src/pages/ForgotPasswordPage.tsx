@@ -1,7 +1,6 @@
 import { FormEvent, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { ApiError, request } from "../api/client";
-import { BrandMark } from "../components/BrandMark";
 import { isEmail, TOO_MANY_ATTEMPTS } from "../session";
 
 export function ForgotPasswordPage() {
@@ -55,7 +54,6 @@ export function ForgotPasswordPage() {
   return (
     <div className="auth">
       <form className="auth-card" onSubmit={(event) => void onSubmit(event)} noValidate>
-        <BrandMark large />
         <h1>Reset password</h1>
         {sent ? (
           <p>If that email has an account, we sent a link to reset the password.</p>

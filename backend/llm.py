@@ -119,9 +119,9 @@ class Cursor:
     def __init__(self, model: str = CURSOR_MODEL) -> None:
         self.model = model
 
-    def run(self, prompt: str):
+    def run(self, prompt: str, images: list[tuple[str, bytes]] | None = None):
         api_key = require_env("CURSOR_API_KEY")
-        from cursor_sdk import Agent, AgentOptions, LocalAgentOptions, ModelParameterValue, ModelSelection
+        from cursor_sdk import Agent, AgentOptions, LocalAgentOptions, ModelParameterValue, ModelSelection, SDKImage, UserMessage
 
         model = self.model
         if self.model.startswith("grok-"):
@@ -132,8 +132,14 @@ class Cursor:
                     ModelParameterValue(id="fast", value=CURSOR_FAST),
                 ],
             )
+        message: str | UserMessage = prompt
+        if images:
+            message = UserMessage(
+                text=prompt,
+                images=[SDKImage.from_data(data, "image/" + fmt) for fmt, data in images],
+            )
         result = Agent.prompt(
-            prompt,
+            message,
             AgentOptions(api_key=api_key, model=model, local=LocalAgentOptions(cwd=str(product_cwd()))),
         )
         if result.status == "error":

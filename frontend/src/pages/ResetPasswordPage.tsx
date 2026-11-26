@@ -1,7 +1,6 @@
 import { FormEvent, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { ApiError, request } from "../api/client";
-import { BrandMark } from "../components/BrandMark";
 import { PASSWORD_REJECTED, acceptablePassword } from "../session";
 
 export function ResetPasswordPage() {
@@ -83,7 +82,6 @@ export function ResetPasswordPage() {
   return (
     <div className="auth">
       <form className="auth-card" onSubmit={(event) => void onSubmit(event)} noValidate>
-        <BrandMark large />
         <h1>Choose a new password</h1>
         {done ? <p>Password changed. You can sign in.</p> : null}
         {token && !done ? (
