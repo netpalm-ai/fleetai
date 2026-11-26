@@ -7,6 +7,7 @@ from uuid import UUID
 
 from fastapi.testclient import TestClient
 
+import db
 from auth.app import app as auth_app
 
 CSRF = {"X-Requested-With": "fleetai"}
@@ -42,4 +43,6 @@ def register_verify_login(
         logged = auth.post("/auth/login", json={"email": email, "password": password}, headers=CSRF)
         assert logged.status_code == 200, logged.text
         api_client.cookies.update(auth.cookies)
-        return UUID(created.json()["id"])
+        user_id = UUID(created.json()["id"])
+    db.open_pool()
+    return user_id

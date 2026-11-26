@@ -177,6 +177,38 @@ def list_open_tickets(user_id: UUID) -> list[dict]:
     return [dict(row) for row in rows]
 
 
+def list_visible_tickets(user_id: UUID) -> list[dict]:
+    with db.get_pool().connection() as conn:
+        rows = conn.execute(
+            f"""
+            SELECT {_TICKET_COLS}
+            FROM tickets t
+            LEFT JOIN intakes i ON i.id = t.intake_id
+            LEFT JOIN users u ON u.id = t.user_id
+            {_USER_TIER_JOINS}
+            WHERE t.user_id = %s
+              AND (
+                t.status IN ('unresolved', 'verifying')
+                OR (
+                  t.status IN ('fixed', 'completed')
+                  AND (
+                    {_KEEP_FOR} IS NULL
+                    OR t.handled_at > now() - ({_KEEP_FOR})
+                  )
+                )
+              )
+              AND (
+                t.status IN ('fixed', 'completed')
+                OR t.intake_id IS NULL
+                OR i.status = 'active'
+              )
+            ORDER BY t.public_id
+            """,
+            (user_id,),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
 def open_tickets(user_id: UUID) -> list[dict]:
     with db.get_pool().connection() as conn:
         rows = conn.execute(
