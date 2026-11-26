@@ -11,16 +11,28 @@ function isLocked(err: unknown): boolean {
   return err instanceof ApiError && err.status === 429;
 }
 
+function focusNamed(form: HTMLFormElement, name: string) {
+  const field = form.elements.namedItem(name);
+  if (field instanceof HTMLElement) {
+    field.focus();
+  }
+}
+
 export function AuthenticatorSetup({ onError }: { onError: (err: unknown) => void }) {
   const [enabled, setEnabled] = useState<boolean | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [setup, setSetup] = useState<Setup | null>(null);
   const [recoveryCodes, setRecoveryCodes] = useState<string[] | null>(null);
-  const [formError, setFormError] = useState<string | null>(null);
+  const [passwordError, setPasswordError] = useState<string | null>(null);
+  const [codeError, setCodeError] = useState<string | null>(null);
 
   useEffect(() => {
     request<{ totp_enabled: boolean }>("/auth/me")
       .then((user) => setEnabled(user.totp_enabled))
-      .catch(onError);
+      .catch((err: unknown) => {
+        onError(err);
+        setLoadFailed(true);
+      });
   }, [onError]);
 
   async function onStart() {
@@ -31,28 +43,50 @@ export function AuthenticatorSetup({ onError }: { onError: (err: unknown) => voi
     }
   }
 
+  function readValidatedFields(form: HTMLFormElement): { password: string; code: string } | null {
+    const data = new FormData(form);
+    const password = String(data.get("password") ?? "");
+    const code = String(data.get("code") ?? "").trim();
+    setPasswordError(null);
+    setCodeError(null);
+    if (!password) {
+      setPasswordError("Enter your password.");
+    }
+    if (!code) {
+      setCodeError("Enter the authenticator or recovery code.");
+    }
+    if (!password || !code) {
+      focusNamed(form, password ? "code" : "password");
+      return null;
+    }
+    return { password, code };
+  }
+
   async function onEnable(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const form = new FormData(event.currentTarget);
-    setFormError(null);
+    const form = event.currentTarget;
+    const fields = readValidatedFields(form);
+    if (!fields) {
+      return;
+    }
+    const { password, code } = fields;
     try {
       const result = await request<{ recovery_codes: string[] }>("/auth/totp/enable", {
         method: "POST",
-        body: JSON.stringify({
-          password: String(form.get("password") ?? ""),
-          code: String(form.get("code") ?? "").trim(),
-        }),
+        body: JSON.stringify({ password, code }),
       });
       setRecoveryCodes(result.recovery_codes);
       setEnabled(true);
       setSetup(null);
     } catch (err: unknown) {
       if (err instanceof ApiError && err.status === 400) {
-        setFormError("That code is wrong.");
+        setCodeError("That code is wrong.");
+        focusNamed(form, "code");
         return;
       }
       if (isWrongPassword(err)) {
-        setFormError("Wrong password.");
+        setPasswordError("Wrong password.");
+        focusNamed(form, "password");
         return;
       }
       onError(err);
@@ -61,24 +95,28 @@ export function AuthenticatorSetup({ onError }: { onError: (err: unknown) => voi
 
   async function onDisable(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const form = new FormData(event.currentTarget);
-    setFormError(null);
+    const form = event.currentTarget;
+    const fields = readValidatedFields(form);
+    if (!fields) {
+      return;
+    }
+    const { password, code } = fields;
     try {
       await request<void>("/auth/totp/disable", {
         method: "POST",
-        body: JSON.stringify({
-          password: String(form.get("password") ?? ""),
-          code: String(form.get("code") ?? "").trim(),
-        }),
+        body: JSON.stringify({ password, code }),
       });
       setEnabled(false);
     } catch (err: unknown) {
       if (isWrongPassword(err)) {
-        setFormError("Wrong password or code.");
+        setPasswordError("Wrong password or code.");
+        setCodeError("Wrong password or code.");
+        focusNamed(form, "password");
         return;
       }
       if (isLocked(err)) {
-        setFormError("Too many wrong codes. Try again later.");
+        setCodeError("Too many wrong codes. Try again later.");
+        focusNamed(form, "code");
         return;
       }
       onError(err);
@@ -86,7 +124,14 @@ export function AuthenticatorSetup({ onError }: { onError: (err: unknown) => voi
   }
 
   if (enabled === null) {
-    return null;
+    return (
+      <section className="board settings">
+        <div className="board-head">
+          <h2>Two-factor authentication</h2>
+        </div>
+        <p className="muted">{loadFailed ? "Could not load authenticator settings." : "Loading authenticator…"}</p>
+      </section>
+    );
   }
   return (
     <section className="board settings">
@@ -115,17 +160,34 @@ export function AuthenticatorSetup({ onError }: { onError: (err: unknown) => voi
           <p className="muted">Two-factor authentication is on. Sign-in asks for a code from your authenticator app.</p>
           <label className="field">
             Password
-            <input name="password" type="password" autoComplete="current-password" />
+            <input
+              name="password"
+              type="password"
+              autoComplete="current-password"
+              aria-invalid={passwordError ? true : undefined}
+              aria-describedby={passwordError ? "totp-password-error" : undefined}
+            />
+            {passwordError ? (
+              <p className="form-error" id="totp-password-error" role="alert">
+                {passwordError}
+              </p>
+            ) : null}
           </label>
           <label className="field">
             Authenticator or recovery code
-            <input name="code" inputMode="numeric" autoComplete="one-time-code" />
+            <input
+              name="code"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              aria-invalid={codeError ? true : undefined}
+              aria-describedby={codeError ? "totp-code-error" : undefined}
+            />
+            {codeError ? (
+              <p className="form-error" id="totp-code-error" role="alert">
+                {codeError}
+              </p>
+            ) : null}
           </label>
-          {formError ? (
-            <p className="form-error" role="alert">
-              {formError}
-            </p>
-          ) : null}
           <button className="btn btn-primary btn-block" type="submit">
             Turn off
           </button>
@@ -142,20 +204,37 @@ export function AuthenticatorSetup({ onError }: { onError: (err: unknown) => voi
       {setup ? (
         <form onSubmit={(event) => void onEnable(event)} noValidate>
           <p className="muted">Scan this QR code with your authenticator app, or enter the key {setup.secret}.</p>
-          <img src={setup.qr} alt="Authenticator QR code" />
+          {setup.qr.startsWith("data:image/png") ? <img src={setup.qr} alt="Authenticator QR code" /> : null}
           <label className="field">
             Password
-            <input name="password" type="password" autoComplete="current-password" />
+            <input
+              name="password"
+              type="password"
+              autoComplete="current-password"
+              aria-invalid={passwordError ? true : undefined}
+              aria-describedby={passwordError ? "totp-enable-password-error" : undefined}
+            />
+            {passwordError ? (
+              <p className="form-error" id="totp-enable-password-error" role="alert">
+                {passwordError}
+              </p>
+            ) : null}
           </label>
           <label className="field">
             Code from the app
-            <input name="code" inputMode="numeric" autoComplete="one-time-code" />
+            <input
+              name="code"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              aria-invalid={codeError ? true : undefined}
+              aria-describedby={codeError ? "totp-enable-code-error" : undefined}
+            />
+            {codeError ? (
+              <p className="form-error" id="totp-enable-code-error" role="alert">
+                {codeError}
+              </p>
+            ) : null}
           </label>
-          {formError ? (
-            <p className="form-error" role="alert">
-              {formError}
-            </p>
-          ) : null}
           <button className="btn btn-primary btn-block" type="submit">
             Turn on
           </button>

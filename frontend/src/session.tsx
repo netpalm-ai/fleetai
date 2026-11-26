@@ -10,7 +10,7 @@ export const PASSWORD_REJECTED = "Choose a stronger password.";
 export const CODE_REQUIRED = "Enter the 6-digit code from your authenticator app, or a recovery code.";
 export const CODE_REJECTED = "That code was not accepted.";
 export const TOO_MANY_ATTEMPTS = "Too many attempts. Try again later.";
-const VERIFY_EMAIL_FIRST = "Verify your email before signing in.";
+export const VERIFY_EMAIL_FIRST = "Verify your email before signing in.";
 const PING_MS = 5 * 60_000;
 const ACTIVITY_EVENTS = ["pointerdown", "pointermove", "keydown", "wheel", "touchstart"];
 
@@ -68,7 +68,6 @@ function errorMessage(err: unknown, fallback: string): string {
     if (err.status === 422) {
       return "Check the name, email, password, and Terms of Service.";
     }
-    return err.message;
   }
   return fallback;
 }
@@ -174,7 +173,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           if (err instanceof ApiError && err.status === 422) {
             return "Enter your email and password.";
           }
-          return "Sign in failed.";
+          return "Could not sign in. Try again.";
         }
       },
       async signUp(
@@ -221,7 +220,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           });
           return null;
         } catch (err) {
-          return errorMessage(err, "Sign up failed.");
+          return errorMessage(err, "Could not create the account. Try again.");
         }
       },
       async signOut() {

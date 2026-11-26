@@ -6,19 +6,28 @@ import { isEmail, TOO_MANY_ATTEMPTS } from "../session";
 
 export function ForgotPasswordPage() {
   const [sent, setSent] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [emailError, setEmailError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const lock = useRef(false);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const email = String(new FormData(event.currentTarget).get("email") ?? "").trim();
+    const form = event.currentTarget;
+    const emailField = form.elements.namedItem("email");
+    const email = String(new FormData(form).get("email") ?? "").trim();
+    setEmailError(null);
     if (!email) {
-      setError("Enter your email.");
+      setEmailError("Enter your email.");
+      if (emailField instanceof HTMLElement) {
+        emailField.focus();
+      }
       return;
     }
     if (!isEmail(email)) {
-      setError("Enter a valid email address.");
+      setEmailError("Enter a valid email address.");
+      if (emailField instanceof HTMLElement) {
+        emailField.focus();
+      }
       return;
     }
     if (lock.current) {
@@ -26,7 +35,6 @@ export function ForgotPasswordPage() {
     }
     lock.current = true;
     setPending(true);
-    setError(null);
     try {
       await request<{ sent: boolean }>("/auth/password/forgot", {
         method: "POST",
@@ -34,7 +42,10 @@ export function ForgotPasswordPage() {
       });
       setSent(true);
     } catch (err) {
-      setError(err instanceof ApiError && err.status === 429 ? TOO_MANY_ATTEMPTS : "Request failed.");
+      setEmailError(err instanceof ApiError && err.status === 429 ? TOO_MANY_ATTEMPTS : "Could not send the reset link. Try again.");
+      if (emailField instanceof HTMLElement) {
+        emailField.focus();
+      }
     } finally {
       lock.current = false;
       setPending(false);
@@ -52,13 +63,21 @@ export function ForgotPasswordPage() {
           <>
             <label className="field">
               Email
-              <input name="email" type="email" autoComplete="email" inputMode="email" autoFocus />
+              <input
+                name="email"
+                type="email"
+                autoComplete="email"
+                inputMode="email"
+                autoFocus
+                aria-invalid={emailError ? true : undefined}
+                aria-describedby={emailError ? "forgot-email-error" : undefined}
+              />
+              {emailError ? (
+                <p className="form-error" id="forgot-email-error" role="alert">
+                  {emailError}
+                </p>
+              ) : null}
             </label>
-            {error ? (
-              <p className="form-error" role="alert">
-                {error}
-              </p>
-            ) : null}
             <button className="btn btn-primary btn-block" type="submit" disabled={pending}>
               Send reset link
             </button>
