@@ -216,6 +216,26 @@ class GithubConnectTests(unittest.TestCase):
             connections.github.prepare(self.user_id, project_id)
         self.assertEqual(str(raised.exception), "GitHub is not connected")
 
+    def test_rejected_github_token_retries_without_it(self) -> None:
+        calls: list[list[str]] = []
+
+        def fake_run(command, cwd, capture_output, text):
+            calls.append(command)
+            if any(part.startswith("http.extraheader=") for part in command):
+                return subprocess.CompletedProcess(
+                    command,
+                    128,
+                    "",
+                    "fatal: could not read Username for 'https://github.com': No such device or address",
+                )
+            return subprocess.CompletedProcess(command, 0, "", "")
+
+        with patch("connections.subprocess.run", side_effect=fake_run):
+            connections.github.git(Path("/tmp"), "gho_secret", "ls-remote", "https://github.com/netpalm-ai/fleetai.git")
+        self.assertEqual(len(calls), 2)
+        self.assertTrue(any(part.startswith("http.extraheader=") for part in calls[0]))
+        self.assertFalse(any(part.startswith("http.extraheader=") for part in calls[1]))
+
     def test_prepare_clones_under_the_product_root_and_uses_fleetai_dev(self) -> None:
         connections.github.save_connection(self.user_id, "octocat", "gho_secret")
         with patch.object(connections.github, "list_repos", return_value=["acme/api"]):

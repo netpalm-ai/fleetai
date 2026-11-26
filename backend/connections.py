@@ -261,14 +261,21 @@ class GithubConnection:
             return
         self.git(dest, token, "checkout", "-B", self.WORK_BRANCH, remote)
 
-    def git(self, cwd, token: str | None, *args: str) -> str:
+    def _run_git(self, cwd, token: str | None, args: tuple[str, ...]) -> subprocess.CompletedProcess[str]:
         command = ["git"]
         if token:
             command.extend(["-c", "http.extraheader=AUTHORIZATION: bearer {0}".format(token)])
-        result = subprocess.run(command + list(args), cwd=cwd, capture_output=True, text=True)
+        return subprocess.run(command + list(args), cwd=cwd, capture_output=True, text=True)
+
+    def git(self, cwd, token: str | None, *args: str) -> str:
+        result = self._run_git(cwd, token, args)
+        detail = (result.stderr or result.stdout or "").lower()
+        rejected = "could not read username" in detail or "authentication failed" in detail or "invalid username or token" in detail
+        if result.returncode != 0 and token and rejected:
+            result = self._run_git(cwd, None, args)
         if result.returncode != 0:
-            detail = (result.stderr or result.stdout or "git failed").strip().splitlines()
-            raise RuntimeError(detail[-1] if detail else "git failed")
+            lines = (result.stderr or result.stdout or "git failed").strip().splitlines()
+            raise RuntimeError(lines[-1] if lines else "git failed")
         return result.stdout
 
     def project_repos(self, user_id: UUID, project_id: UUID) -> list[str]:
