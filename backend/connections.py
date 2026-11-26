@@ -20,6 +20,7 @@ import db
 
 _REPO_NAME = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 _PROJECT_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+CATALOG_REPOS = {"FleetAI": ("netpalm-ai/fleetai",)}
 _TIMEOUT = 30
 
 
@@ -270,16 +271,43 @@ class GithubConnection:
             raise RuntimeError(detail[-1] if detail else "git failed")
         return result.stdout
 
-    def prepare(self, user_id: UUID) -> config.Checkout | None:
+    def project_repos(self, user_id: UUID, project_id: UUID) -> list[str]:
+        with db.get_pool().connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT full_name FROM github_repos
+                WHERE user_id = %s AND project_id = %s
+                ORDER BY full_name
+                """,
+                (user_id, project_id),
+            ).fetchall()
+        names = [str(row["full_name"]) for row in rows]
+        for repo in CATALOG_REPOS.get(project_name(project_id) or "", ()):
+            if repo not in names:
+                names.append(repo)
+        return names
+
+    def prepare(self, user_id: UUID, project_id: UUID | None = None) -> config.Checkout | None:
         found = self._connection(user_id)
-        if found is None:
-            return None
-        repos = self.selected_repos(user_id)
-        if not found.project:
-            raise RuntimeError("name the project in Settings")
-        if not repos:
-            raise RuntimeError("choose GitHub repositories in Settings")
-        root = config.projects_root() / str(user_id) / found.project
+        if project_id is None:
+            if found is None:
+                return None
+            repos = self.selected_repos(user_id)
+            project = found.project
+            if not project:
+                raise RuntimeError("name the project in Settings")
+            if not repos:
+                raise RuntimeError("choose GitHub repositories in Settings")
+        else:
+            project = project_name(project_id) or ""
+            repos = self.project_repos(user_id, project_id)
+            if not project:
+                raise RuntimeError("name the project in Settings")
+            if not repos:
+                return None
+            if found is None:
+                raise RuntimeError("GitHub is not connected")
+        root = config.projects_root() / str(user_id) / project
         root.mkdir(parents=True, exist_ok=True)
         seen: set[str] = set()
         dirs: list[tuple[str, str]] = []
@@ -300,8 +328,8 @@ class GithubConnection:
         return config.Checkout(root=root, token=found.token, branch=self.WORK_BRANCH)
 
     @contextmanager
-    def checkout_for(self, user_id: UUID):
-        prepared = self.prepare(user_id)
+    def checkout_for(self, user_id: UUID, project_id: UUID | None = None):
+        prepared = self.prepare(user_id, project_id)
         if prepared is None:
             yield
             return

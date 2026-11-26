@@ -148,6 +148,14 @@ class GithubConnectTests(unittest.TestCase):
             [(row["org"], row["product_name"]) for row in rows],
             [("Netpalm.AI", "FleetAI"), ("HBA", "JarvisMD")],
         )
+        self.assertIn("## Product", rows[0]["codebase_context"])
+        self.assertIn("FleetAI", rows[0]["codebase_context"])
+        self.assertIn("## Org", rows[0]["codebase_context"])
+        self.assertIn("Netpalm.AI", rows[0]["codebase_context"])
+        self.assertIn("## Tech stack", rows[0]["codebase_context"])
+        self.assertIn("React, TypeScript, FastAPI, Postgres", rows[0]["codebase_context"])
+        self.assertIn("$FLEETAI_PRODUCT_ROOT/fleetai/frontend", rows[0]["codebase_context"])
+        self.assertIn("fleetai/dev", rows[0]["codebase_context"])
         self.assertIn("## Repositories", rows[0]["codebase_context"])
         self.assertIn("jmd-frontend", rows[1]["codebase_context"])
 
@@ -179,6 +187,34 @@ class GithubConnectTests(unittest.TestCase):
                 {"full_name": "acme/api", "selected": True},
             ],
         )
+
+    def test_fleetai_project_clones_its_repository(self) -> None:
+        connections.github.save_connection(self.user_id, "octocat", "gho_secret")
+        with db.get_pool().connection() as conn:
+            project_id = connections.upsert_project(conn, self.user_id, "FleetAI")
+            conn.commit()
+        calls: list[tuple] = []
+
+        def fake_git(cwd, token, *args):
+            calls.append((Path(cwd).name, args))
+            if args[-1:] == ("refs/heads/fleetai/dev",):
+                raise RuntimeError("missing")
+            return ""
+
+        with TemporaryDirectory() as raw:
+            with patch.dict(os.environ, {"FLEETAI_PROJECTS": raw}), patch.object(connections.github, "git", side_effect=fake_git):
+                checkout = connections.github.prepare(self.user_id, project_id)
+        self.assertEqual(checkout.root, Path(raw) / str(self.user_id) / "FleetAI")
+        self.assertEqual(calls[0], ("FleetAI", ("clone", "--origin", "origin", "--", "https://github.com/netpalm-ai/fleetai.git", "fleetai")))
+        self.assertEqual(calls[-1][1], ("checkout", "-B", "fleetai/dev", "origin/fleetai/dev"))
+
+    def test_fleetai_clone_requires_github(self) -> None:
+        with db.get_pool().connection() as conn:
+            project_id = connections.upsert_project(conn, self.user_id, "FleetAI")
+            conn.commit()
+        with self.assertRaises(RuntimeError) as raised:
+            connections.github.prepare(self.user_id, project_id)
+        self.assertEqual(str(raised.exception), "GitHub is not connected")
 
     def test_prepare_clones_under_the_product_root_and_uses_fleetai_dev(self) -> None:
         connections.github.save_connection(self.user_id, "octocat", "gho_secret")

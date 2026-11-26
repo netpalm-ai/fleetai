@@ -12,7 +12,14 @@ export function SignUpPage() {
   const lock = useRef(false);
 
   if (!ready) {
-    return null;
+    return (
+      <div className="auth">
+        <div className="auth-card">
+          <BrandMark large />
+          <p className="muted">Loading…</p>
+        </div>
+      </div>
+    );
   }
   if (username) {
     return <Navigate to="/tickets" replace />;
@@ -102,21 +109,12 @@ export function SignUpPage() {
             name="password"
             type="password"
             autoComplete="new-password"
-            minLength={10}
-            maxLength={128}
             required
           />
         </label>
         <label className="field">
           Confirm password
-          <input
-            name="confirm"
-            type="password"
-            autoComplete="new-password"
-            minLength={10}
-            maxLength={128}
-            required
-          />
+          <input name="confirm" type="password" autoComplete="new-password" required />
         </label>
         <label className="accept">
           <input

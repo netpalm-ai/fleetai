@@ -4,16 +4,7 @@ import { AppShell } from "../components/AppShell";
 import { useSession } from "../session";
 import type { Job, Project, Ticket } from "../types";
 
-function handlingId(tickets: Ticket[]): string | null {
-  const unresolved = tickets.find((ticket) => ticket.status === "unresolved");
-  if (unresolved) {
-    return unresolved.id;
-  }
-  const verifying = tickets.find((ticket) => ticket.status === "verifying");
-  return verifying ? verifying.id : null;
-}
-
-function liveStatus(ticket: Ticket, running: boolean, activeId: string | null): string {
+function liveStatus(ticket: Ticket, running: boolean, bulk: boolean, activeId: string | null, chosen: boolean): string {
   if (running && ticket.id === activeId) {
     return ticket.status === "verifying" ? "Verifying…" : "Solving…";
   }
@@ -26,7 +17,7 @@ function liveStatus(ticket: Ticket, running: boolean, activeId: string | null): 
   if (ticket.status === "completed") {
     return "Completed";
   }
-  if (running && ticket.status === "unresolved") {
+  if (bulk && chosen && ticket.status === "unresolved") {
     return "Queued";
   }
   if (ticket.status === "unresolved" && ticket.latest_verdict === "blocked") {
@@ -36,6 +27,12 @@ function liveStatus(ticket: Ticket, running: boolean, activeId: string | null): 
     return "Failed";
   }
   return "Open";
+}
+
+function openTicketIds(rows: Ticket[] | null): string[] {
+  return (rows ?? [])
+    .filter((row) => row.status === "unresolved" || row.status === "verifying")
+    .map((row) => row.id);
 }
 
 function ticketBlurb(ticket: Ticket): string {
@@ -77,6 +74,9 @@ export function TicketsPage() {
   const [projects, setProjects] = useState<Project[] | null>(null);
   const [projectId, setProjectId] = useState<string | null>(null);
   const [tickets, setTickets] = useState<Ticket[] | null>(null);
+  const [selected, setSelected] = useState<string[]>([]);
+  const [runIds, setRunIds] = useState<string[]>([]);
+  const listedIds = useRef<Set<string> | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [job, setJob] = useState<Job | null>(null);
   const [busy, setBusy] = useState(false);
@@ -91,17 +91,31 @@ export function TicketsPage() {
     }
     const path = projectId ? `/tickets?project_id=${encodeURIComponent(projectId)}` : "/tickets";
     getJson<Ticket[]>(path)
-      .then(setTickets)
+      .then((rows) => {
+        const previous = listedIds.current;
+        const openIds = openTicketIds(rows);
+        listedIds.current = new Set(rows.map((row) => row.id));
+        setTickets(rows);
+        setSelected((current) => {
+          if (previous == null) {
+            return openIds;
+          }
+          const open = new Set(openIds);
+          const kept = current.filter((id) => open.has(id));
+          const added = openIds.filter((id) => !previous.has(id) && !kept.includes(id));
+          return kept.concat(added);
+        });
+      })
       .catch((err: unknown) => {
         if (err instanceof ApiError && err.status === 403) {
           setError("This account cannot use tickets.");
           return;
         }
         if (err instanceof ApiError && err.status === 409) {
-          setError("workflow busy");
+          setError("A run is already in progress.");
           return;
         }
-        const message = requestError(err, "request failed");
+        const message = requestError(err, "Something went wrong. Try again.");
         if (message) {
           setError(message);
         }
@@ -123,7 +137,7 @@ export function TicketsPage() {
         });
       })
       .catch((err: unknown) => {
-        const message = requestError(err, "request failed");
+        const message = requestError(err, "Something went wrong. Try again.");
         if (message) {
           setError(message);
         }
@@ -158,18 +172,21 @@ export function TicketsPage() {
         .then((next) => {
           setJob(next);
           load();
-          if (next.status === "done" || next.status === "error") {
-            setBusy(false);
-            stopPoll();
-            if (next.status === "error") {
-              setError(next.error || "resolve failed");
-            }
+          if (next.status !== "done" && next.status !== "error") {
+            return;
+          }
+          stopPoll();
+          setBusy(false);
+          setRunIds([]);
+          if (next.status === "error") {
+            setError(next.error || "Could not resolve tickets. Try again.");
           }
         })
         .catch((err: unknown) => {
           setBusy(false);
+          setRunIds([]);
           stopPoll();
-          const message = requestError(err, "job poll failed");
+          const message = requestError(err, "Could not resolve tickets. Try again.");
           if (message) {
             setError(message);
           }
@@ -255,32 +272,45 @@ export function TicketsPage() {
     }
   }
 
-  async function onResolve() {
-    const list = listMode === "pdf" ? "" : listText;
-    const encoded = listMode === "pdf" ? pdfBase64 : null;
-    if (!email.trim() && !list.trim() && !encoded) {
-      setError("Add an email or a ticket list.");
+  function toggleSelected(ticketId: string, checked: boolean) {
+    setSelected((current) =>
+      checked ? current.concat(ticketId) : current.filter((id) => id !== ticketId),
+    );
+  }
+
+  async function startResolve(ids: string[], emptyMessage: string, saveInputs: boolean) {
+    if (ids.length === 0) {
+      setError(emptyMessage);
       return;
     }
+    const list = listMode === "pdf" ? "" : listText;
+    const encoded = listMode === "pdf" ? pdfBase64 : null;
     setError(null);
     setBusy(true);
+    setRunIds(ids);
     try {
-      await request<void>("/tickets/inputs", {
+      if (saveInputs && (email.trim() || list.trim() || encoded)) {
+        await request<void>("/tickets/inputs", {
+          method: "POST",
+          body: JSON.stringify({
+            email,
+            list_text: list,
+            context,
+            list_pdf_base64: encoded,
+          }),
+        });
+      }
+      const started = await request<Job>("/execute", {
         method: "POST",
-        body: JSON.stringify({
-          email,
-          list_text: list,
-          context,
-          list_pdf_base64: encoded,
-        }),
+        body: JSON.stringify({ ticket_ids: ids }),
       });
-      const started = await request<Job>("/execute", { method: "POST" });
       setJob(started);
       load();
       watchJob(started.id);
     } catch (err: unknown) {
       setBusy(false);
-      const message = requestError(err, "resolve failed");
+      setRunIds([]);
+      const message = requestError(err, "Could not resolve tickets. Try again.");
       if (message) {
         setError(message);
       }
@@ -288,7 +318,8 @@ export function TicketsPage() {
   }
 
   const running = busy || job?.status === "running";
-  const activeId = tickets && running ? handlingId(tickets) : null;
+  const bulk = running && !job?.ticket_id;
+  const activeId = running ? job?.ticket_id || null : null;
 
   function selectProject(id: string) {
     if (id === projectId) {
@@ -296,6 +327,8 @@ export function TicketsPage() {
     }
     setProjectId(id);
     setTickets(null);
+    setSelected([]);
+    listedIds.current = null;
     setOpenId(null);
     setReport(null);
   }
@@ -334,11 +367,11 @@ export function TicketsPage() {
         <div className="studio">
           <section className="intake">
             <label className="field">
-              Email
+              Notes
               <textarea
                 name="email"
                 rows={6}
-                placeholder="Paste the evaluator email or defect notes."
+                placeholder="Paste an email or defect notes."
                 value={email}
                 onChange={(event) => setEmail(event.target.value)}
               />
@@ -371,7 +404,7 @@ export function TicketsPage() {
                     aria-hidden="true"
                     onChange={onPdf}
                   />
-                  Upload or Drop PDF here
+                  Upload PDF
                 </label>
               </div>
               {listMode === "paste" ? (
@@ -396,7 +429,12 @@ export function TicketsPage() {
                 onChange={(event) => setContext(event.target.value)}
               />
             </label>
-            <button type="button" className="btn btn-primary btn-block resolve-btn" disabled={running} onClick={() => void onResolve()}>
+            <button
+              type="button"
+              className="btn btn-primary btn-block resolve-btn"
+              disabled={running}
+              onClick={() => void startResolve(openTicketIds(tickets), "No tickets to resolve.", true)}
+            >
               {running ? "Resolving…" : "Resolve tickets"}
             </button>
           </section>
@@ -408,7 +446,7 @@ export function TicketsPage() {
             {tickets == null && !error ? <p className="muted">Loading tickets…</p> : null}
             {tickets && tickets.length === 0 ? (
               <p className="muted">
-                {running ? "Parsing the list…" : "No tickets yet. Resolve to parse a list."}
+                {running ? "Reading the list…" : "No tickets yet. Add a list, then choose Resolve."}
               </p>
             ) : null}
             {tickets && tickets.length > 0 ? (
@@ -417,7 +455,7 @@ export function TicketsPage() {
                   const blurb = ticketBlurb(ticket);
                   const active = ticket.id === activeId;
                   const handled = stamp(ticket.handled_at);
-                  const outcome = liveStatus(ticket, running, activeId);
+                  const outcome = liveStatus(ticket, running, bulk, activeId, runIds.includes(ticket.id));
                   return (
                     <li
                       key={ticket.id}
@@ -437,6 +475,17 @@ export function TicketsPage() {
                       {blurb ? <p className="ticket-desc">{blurb}</p> : null}
                       {handled ? <p className="ticket-meta">Handled {handled}</p> : null}
                       <div className="ticket-actions">
+                        {ticket.status === "unresolved" || ticket.status === "verifying" ? (
+                          <label className="accept">
+                            <input
+                              type="checkbox"
+                              aria-label={"Resolve " + ticket.id}
+                              checked={selected.includes(ticket.id)}
+                              disabled={running}
+                              onChange={(event) => toggleSelected(ticket.id, event.target.checked)}
+                            />
+                          </label>
+                        ) : null}
                         {ticket.status === "verifying" && !running ? (
                           <button
                             type="button"
@@ -463,6 +512,16 @@ export function TicketsPage() {
                   );
                 })}
               </ul>
+            ) : null}
+            {tickets != null ? (
+              <button
+                type="button"
+                className="btn btn-primary btn-block resolve-btn"
+                disabled={running}
+                onClick={() => void startResolve(selected, "Select a ticket.", false)}
+              >
+                {running ? "Resolving…" : "Resolve only"}
+              </button>
             ) : null}
           </section>
         </div>

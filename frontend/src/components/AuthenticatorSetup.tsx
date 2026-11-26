@@ -112,7 +112,7 @@ export function AuthenticatorSetup({ onError }: { onError: (err: unknown) => voi
       ) : null}
       {enabled && !recoveryCodes ? (
         <form onSubmit={(event) => void onDisable(event)} noValidate>
-          <p className="muted">On. Signing in asks for a code from your authenticator app.</p>
+          <p className="muted">Two-factor authentication is on. Sign-in asks for a code from your authenticator app.</p>
           <label className="field">
             Password
             <input name="password" type="password" autoComplete="current-password" />
@@ -133,7 +133,7 @@ export function AuthenticatorSetup({ onError }: { onError: (err: unknown) => voi
       ) : null}
       {!enabled && !setup ? (
         <>
-          <p className="muted">Off. Add an authenticator app to ask for a code at sign-in.</p>
+          <p className="muted">Two-factor authentication is off. Add an authenticator app to require a code at sign-in.</p>
           <button className="btn btn-primary btn-block" type="button" onClick={() => void onStart()}>
             Set up authenticator
           </button>

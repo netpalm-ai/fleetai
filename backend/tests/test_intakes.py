@@ -218,6 +218,20 @@ class TicketStorageTests(unittest.TestCase):
         solve.assert_called_once_with(self.user_id)
         verify.assert_called_once_with(self.user_id)
 
+    def test_execute_resolves_only_the_selected_tickets(self) -> None:
+        intakes.sync_tickets(self.user_id, None, [_ticket("T1"), _ticket("T2")])
+        intakes.set_ticket_status(self.user_id, "T2", "verifying")
+        with (
+            patch.object(orchestrator.parser, "get_tickets") as parse,
+            patch.object(orchestrator.solver, "solve") as solve,
+            patch.object(orchestrator.verifier, "verify") as verify,
+        ):
+            orchestrator.execute(self.user_id, None, ["T1"])
+        parse.assert_not_called()
+        solve.assert_called_once_with(self.user_id, "T1")
+        verify.assert_not_called()
+        self.assertEqual(intakes.find_ticket(self.user_id, "T2")["status"], "verifying")
+
     def test_execute_retries_verify_until_fixed(self) -> None:
         self._tier("paid")
         intakes.sync_tickets(self.user_id, None, [_ticket("T1")])

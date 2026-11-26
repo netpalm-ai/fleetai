@@ -13,6 +13,10 @@ export function ForgotPasswordPage() {
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const email = String(new FormData(event.currentTarget).get("email") ?? "").trim();
+    if (!email) {
+      setError("Enter your email.");
+      return;
+    }
     if (!isEmail(email)) {
       setError("Enter a valid email address.");
       return;

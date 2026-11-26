@@ -4,9 +4,9 @@ import { ApiError, request, setUnauthorizedHandler } from "./api/client";
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MAX_EMAIL = 254;
-export const MIN_PASSWORD = 10;
-export const MAX_PASSWORD = 128;
-export const PASSWORD_LENGTH_TEXT = "Password must be 10 to 128 characters.";
+const MIN_PASSWORD = 10;
+const MAX_PASSWORD = 128;
+export const PASSWORD_REJECTED = "Choose a stronger password.";
 export const CODE_REQUIRED = "Enter the 6-digit code from your authenticator app, or a recovery code.";
 export const CODE_REJECTED = "That code was not accepted.";
 export const TOO_MANY_ATTEMPTS = "Too many attempts. Try again later.";
@@ -202,7 +202,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           return "Enter a valid email address.";
         }
         if (!acceptablePassword(password)) {
-          return PASSWORD_LENGTH_TEXT;
+          return PASSWORD_REJECTED;
         }
         if (!tosAccepted) {
           return "Accept the Terms of Service to create an account.";

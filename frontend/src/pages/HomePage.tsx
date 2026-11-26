@@ -1,11 +1,7 @@
 import { Link } from "react-router-dom";
 import { BrandMark } from "../components/BrandMark";
 
-const CONNECTIONS = [
-  { name: "GitHub", use: "Codebase the agents work against." },
-  { name: "Jira", use: "Tickets they pick up and resolve." },
-  { name: "Trello", use: "Boards and cards as another ticket source." },
-] as const;
+const CONNECTIONS = [{ name: "GitHub", use: "Repositories the agents work in." }] as const;
 
 export function HomePage() {
   return (

@@ -942,8 +942,13 @@ h2 .github-mark {
 .ticket-actions {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 8px;
   margin-top: 10px;
+}
+
+.ticket-actions .accept {
+  margin: 0;
 }
 
 .ticket-meta {

@@ -53,7 +53,7 @@ export function SettingsPage() {
   }, []);
 
   const fail = useCallback((err: unknown) => {
-    const message = requestError(err, "request failed");
+    const message = requestError(err, "Something went wrong. Try again.");
     if (message) {
       setError(message);
     }
@@ -248,7 +248,9 @@ export function SettingsPage() {
                 <div className="board-head">
                   <h2>Ticket history</h2>
                 </div>
-                <p className="muted">Plan: {settings.subscription_status}</p>
+                <p className="muted">
+                  Plan: {settings.subscription_status.charAt(0).toUpperCase() + settings.subscription_status.slice(1)}
+                </p>
                 <p className="muted">{keepText(settings.ticket_retention_days)}</p>
                 {settings.editable ? (
                   <form onSubmit={(event) => void onSave(event)}>

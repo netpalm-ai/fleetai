@@ -78,26 +78,33 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.json(), [{"id": "T1"}])
         get_tickets.assert_called_once_with(USER.id, None)
 
+    def test_execute_requires_a_ticket(self) -> None:
+        with patch.object(api.orchestrator, "execute") as execute:
+            response = self.client.post("/execute", json={"ticket_ids": []}, headers=CSRF)
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["detail"], "Select a ticket.")
+        execute.assert_not_called()
+
     def test_execute_returns_job(self) -> None:
         with patch.object(api.orchestrator, "execute") as execute:
-            response = self.client.post("/execute")
+            response = self.client.post("/execute", json={"ticket_ids": ["T1"]}, headers=CSRF)
         self.assertEqual(response.status_code, 202)
         job = response.json()
         self.assertEqual(job["kind"], "execute")
-        execute.assert_called_once_with(USER.id, None)
+        execute.assert_called_once_with(USER.id, None, ["T1"])
         polled = self.client.get("/jobs/{0}".format(job["id"]))
         self.assertEqual(polled.status_code, 200)
         self.assertEqual(polled.json()["status"], "done")
 
     def test_job_is_private_to_its_user(self) -> None:
         with patch.object(api.orchestrator, "execute"):
-            job = self.client.post("/execute").json()
+            job = self.client.post("/execute", json={"ticket_ids": ["T1"]}, headers=CSRF).json()
         api.app.dependency_overrides[get_current_user] = lambda: PAID
         self.assertEqual(self.client.get("/jobs/{0}".format(job["id"])).status_code, 404)
 
     def test_execute_error_is_reported_on_the_job(self) -> None:
         with patch.object(api.orchestrator, "execute", side_effect=RuntimeError("boom")):
-            job = self.client.post("/execute").json()
+            job = self.client.post("/execute", json={"ticket_ids": ["T1"]}, headers=CSRF).json()
         polled = self.client.get("/jobs/{0}".format(job["id"])).json()
         self.assertEqual(polled["status"], "error")
         self.assertEqual(polled["error"], "boom")
@@ -155,7 +162,7 @@ class ApiTests(unittest.TestCase):
         held.wait()
         try:
             with patch.object(api.orchestrator, "execute") as execute:
-                response = self.client.post("/execute")
+                response = self.client.post("/execute", json={"ticket_ids": ["T1"]}, headers=CSRF)
             self.assertEqual(response.status_code, 409)
             self.assertEqual(response.json()["detail"], "workflow busy")
             execute.assert_not_called()

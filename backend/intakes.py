@@ -241,6 +241,17 @@ def solved_tickets(user_id: UUID) -> dict[str, dict]:
     return {row["id"]: dict(row) for row in rows}
 
 
+def ticket_project_id(user_id: UUID, public_id: str) -> UUID | None:
+    with db.get_pool().connection() as conn:
+        row = conn.execute(
+            "SELECT project_id FROM tickets WHERE user_id = %s AND public_id = %s",
+            (user_id, public_id),
+        ).fetchone()
+    if row is None or row["project_id"] is None:
+        return None
+    return row["project_id"]
+
+
 def find_ticket(user_id: UUID, public_id: str) -> dict | None:
     with db.get_pool().connection() as conn:
         row = conn.execute(

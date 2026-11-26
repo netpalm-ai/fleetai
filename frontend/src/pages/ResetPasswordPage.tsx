@@ -2,7 +2,7 @@ import { FormEvent, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { ApiError, request } from "../api/client";
 import { BrandMark } from "../components/BrandMark";
-import { MAX_PASSWORD, MIN_PASSWORD, PASSWORD_LENGTH_TEXT, acceptablePassword } from "../session";
+import { PASSWORD_REJECTED, acceptablePassword } from "../session";
 
 export function ResetPasswordPage() {
   const [params] = useSearchParams();
@@ -26,7 +26,7 @@ export function ResetPasswordPage() {
       return;
     }
     if (!acceptablePassword(password)) {
-      setError(PASSWORD_LENGTH_TEXT);
+      setError(PASSWORD_REJECTED);
       return;
     }
     if (lock.current) {
@@ -43,7 +43,7 @@ export function ResetPasswordPage() {
       setDone(true);
     } catch (err: unknown) {
       if (err instanceof ApiError && err.status === 422) {
-        setError(PASSWORD_LENGTH_TEXT);
+        setError(PASSWORD_REJECTED);
       } else if (err instanceof ApiError && err.status === 400) {
         setError("This reset link is invalid or expired.");
       } else {
@@ -69,21 +69,12 @@ export function ResetPasswordPage() {
                 name="password"
                 type="password"
                 autoComplete="new-password"
-                minLength={MIN_PASSWORD}
-                maxLength={MAX_PASSWORD}
                 autoFocus
               />
             </label>
-            <p className="muted">{PASSWORD_LENGTH_TEXT}</p>
             <label className="field">
               Confirm password
-              <input
-                name="confirm"
-                type="password"
-                autoComplete="new-password"
-                minLength={MIN_PASSWORD}
-                maxLength={MAX_PASSWORD}
-              />
+              <input name="confirm" type="password" autoComplete="new-password" />
             </label>
             <button className="btn btn-primary btn-block" type="submit" disabled={pending}>
               Change password

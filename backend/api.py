@@ -83,6 +83,10 @@ class GithubReposBody(BaseModel):
     repos: list[str] = Field(default_factory=list, max_length=100)
 
 
+class ExecuteBody(BaseModel):
+    ticket_ids: list[str] = Field(default_factory=list, max_length=200)
+
+
 def _run_job(job: dict, user: User, call) -> None:
     try:
         with config.workflow_lock(user.id, blocking=False):
@@ -295,5 +299,17 @@ def complete_ticket(ticket_id: str, user: User = Depends(require_tickets)) -> di
 
 
 @app.post("/execute", status_code=202)
-def execute(background: BackgroundTasks, user: User = Depends(require_tickets)) -> dict:
-    return _start_job("execute", lambda: orchestrator.execute(user.id, user.session_id), background, user)
+def execute(
+    background: BackgroundTasks,
+    body: ExecuteBody | None = None,
+    user: User = Depends(require_tickets),
+) -> dict:
+    ticket_ids = [item.strip() for item in (body.ticket_ids if body else []) if item and item.strip()]
+    if not ticket_ids:
+        raise HTTPException(400, "Select a ticket.")
+    return _start_job(
+        "execute",
+        lambda: orchestrator.execute(user.id, user.session_id, ticket_ids),
+        background,
+        user,
+    )

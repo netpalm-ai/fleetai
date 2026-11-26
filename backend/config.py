@@ -279,10 +279,10 @@ def _exclude_runner_map(root: Path) -> None:
     exclude.write_text(existing + ".fleetai/\n", encoding="utf-8")
 
 
-def ensure_code_context(user_id: UUID) -> str:
+def ensure_code_context(user_id: UUID, project_id: UUID | None = None) -> str:
     import connections
 
-    project_id = connections.active_project_id(user_id)
+    project_id = project_id or connections.active_project_id(user_id)
     if project_id is None:
         raise RuntimeError("name the project in Settings")
     stored = connections.project_context(project_id)
@@ -586,10 +586,21 @@ def run_step(user_id: UUID, ticket_id: str, want: str, kind: str, make_prompt, n
     if ticket["status"] != want:
         print("{0}\tskipped\t{1}".format(ticket_id, ticket["status"]))
         return
-    code = ensure_code_context(user_id)
-    prompt = make_prompt(ticket, agent_context(code))
-    from llm import cursor
-    result = cursor.run(prompt)
+    import connections
+
+    project_id = intakes.ticket_project_id(user_id, ticket_id)
+
+    def _run():
+        code = ensure_code_context(user_id, project_id)
+        prompt = make_prompt(ticket, agent_context(code))
+        from llm import cursor
+        return prompt, cursor.run(prompt)
+
+    if project_id is None:
+        prompt, result = _run()
+    else:
+        with connections.github.checkout_for(user_id, project_id):
+            prompt, result = _run()
     if result.result:
         print(result.result)
     verdict = last_verdict(result.result)
