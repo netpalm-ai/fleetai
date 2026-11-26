@@ -230,8 +230,15 @@ def _read_required(path: Path, label: str) -> str:
     return text
 
 
+def code_context_path() -> Path:
+    override = (os.getenv("FLEETAI_CODE_CONTEXT") or "").strip()
+    if not override:
+        return CONTEXT_PATH
+    return Path(override)
+
+
 def code_context() -> str:
-    return _read_required(CONTEXT_PATH, "code context")
+    return _read_required(code_context_path(), "code context")
 
 
 def engineering_standard() -> str:

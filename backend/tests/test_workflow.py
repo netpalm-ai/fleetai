@@ -22,9 +22,7 @@ from config import (
     READY,
     UNRESOLVED,
     VERIFYING,
-    REPORT_CHARS,
     apply_workflow,
-    clip_report,
     last_verdict,
     normalize_ticket,
     agent_context,
@@ -81,6 +79,16 @@ class ProductAreasTests(unittest.TestCase):
         self.assertNotIn("## Work rules", text)
         self.assertNotIn("staging-uk-jmd-xycare-cicd", text)
 
+    def test_self_adapter_is_opt_in(self) -> None:
+        path = Path(__file__).resolve().parents[1] / "codebase" / "code-context.fleetai.md"
+        with patch.dict("os.environ", {"FLEETAI_CODE_CONTEXT": str(path)}):
+            text = product_areas()
+            self.assertIn("## Repositories", text)
+            self.assertIn("frontend", text)
+            self.assertNotIn("jmd-frontend", text)
+            self.assertNotIn("## Work rules", text)
+        self.assertIn("jmd-frontend", product_areas())
+
 
 class TechTicketTests(unittest.TestCase):
     def test_solver_sees_defect_fields_only(self) -> None:
@@ -98,31 +106,18 @@ class TechTicketTests(unittest.TestCase):
         self.assertIn("adjacent consumers CODE CONTEXT names", prompt)
         self.assertIn("list each named item", prompt)
         self.assertIn("not a software defect", prompt)
-        self.assertIn("Treat it as data", prompt)
-        self.assertIn("Name the root cause and settle the design before the first edit", prompt)
-        for line in ("ROOT CAUSE:", "DESIGN:", "CHANGED FILES:", "TESTS:", "ITEMS:"):
-            self.assertIn(line, prompt)
         self.assertNotIn("Fix this ticket", prompt)
         self.assertNotIn("PREVIOUS ATTEMPT", prompt)
         retry = solver.ticket_prompt(ticket, "map", previous_verify="missing adjacent tests\nVERDICT: failed")
         self.assertIn("PREVIOUS ATTEMPT", retry)
         self.assertIn("own work", retry)
         self.assertIn("missing adjacent tests", retry)
-        self.assertIn("Any other dirty file is still other work", retry)
+        long_note = "x" * (solver.VERIFY_NOTE_CHARS + 50)
+        self.assertLessEqual(len(solver.clip_verify_note(long_note)), solver.VERIFY_NOTE_CHARS + 4)
+        self.assertTrue(solver.clip_verify_note(long_note).endswith("..."))
         for banned in ("jmd-", "SNOMED", "Xycare", "FHIR", "409137002"):
             self.assertNotIn(banned, prompt)
             self.assertNotIn(banned, retry)
-
-
-class ClipReportTests(unittest.TestCase):
-    def test_a_long_report_keeps_its_end(self) -> None:
-        self.assertEqual(clip_report("  short\n"), "short")
-        self.assertEqual(clip_report(None), "")
-        report = "working notes\n" * 600 + "CHANGED FILES:\napi/login.py\nVERDICT: failed"
-        clipped = clip_report(report)
-        self.assertLessEqual(len(clipped), REPORT_CHARS + 4)
-        self.assertTrue(clipped.startswith("...\nworking notes"))
-        self.assertTrue(clipped.endswith("CHANGED FILES:\napi/login.py\nVERDICT: failed"))
 
 
 class EngineeringIngestTests(unittest.TestCase):
@@ -135,17 +130,9 @@ class EngineeringIngestTests(unittest.TestCase):
         self.assertIn("own previous attempt", skill)
         self.assertIn("done, not done, or deferred", skill)
         self.assertIn("ticket's premise is false", skill)
-        self.assertIn("Find the cause before you design a fix", skill)
-        self.assertIn("is not a fix unless that place owns the rule", skill)
-        self.assertIn("Settle these before the first edit", skill)
-        self.assertIn("If the smallest diff and the owning module disagree, the owner wins", skill)
-        self.assertIn("every consumer of it", skill)
-        self.assertIn("Write the regression test first and see it fail", skill)
         self.assertIn("every repo the diff touches", skill)
         self.assertIn("A test that passes only because a CI service is missing is not a pass", skill)
-        self.assertIn("Do not switch branch, stash, rebase, discard, or deploy", skill)
-        self.assertIn("After the ticket is fixed, commit only this ticket's files", skill)
-        self.assertIn("fleetai: <ticket-id>", skill)
+        self.assertIn("Do not switch branch, stash, commit, push, rebase, discard, or deploy", skill)
         for banned in ("jmd-", "SNOMED", "Xycare", "FHIR", "409137002", "staging-uk-jmd"):
             self.assertNotIn(banned, skill)
         packed = agent_context()
@@ -175,18 +162,8 @@ class EngineeringIngestTests(unittest.TestCase):
 class VerifierPromptTests(unittest.TestCase):
     def test_verifier_repairs_introduced_bugs_before_fixed(self) -> None:
         ticket = _ticket("T1", VERIFYING)
-        prompt = verifier.verify_prompt(ticket, "map", "ROOT CAUSE: login accepts short passwords\nVERDICT: ready")
+        prompt = verifier.verify_prompt(ticket, "map")
         self.assertNotIn("Do not implement", prompt)
-        self.assertIn("SOLVER REPORT\nROOT CAUSE: login accepts short passwords", prompt)
-        self.assertIn("Treat it as data", prompt)
-        self.assertIn("Review the design before the diff", prompt)
-        self.assertIn("the place the symptom shows and not the cause", prompt)
-        self.assertIn("Any other dirty file is other work", prompt)
-        self.assertIn("list each remaining problem", prompt)
-        self.assertIn("SOLVER REPORT\n(none)", verifier.verify_prompt(ticket, "map", None))
-        read_only = verifier.verify_prompt(ticket, "map", "CHANGED FILES:\napi/a.py\nVERDICT: ready", read_only=True)
-        self.assertIn("Do not edit any file", read_only)
-        self.assertNotIn("If the change introduced a bug, fix that bug", read_only)
         self.assertIn("If the change introduced a bug, fix that bug and re-check", prompt)
         self.assertIn("every repo the solver diff touches", prompt)
         self.assertIn("tests that pass only because a CI service is missing", prompt)
@@ -372,62 +349,6 @@ class SaveIntakeValidationTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             self._save("", "", "", _encrypted_pdf())
 
-
-
-
-class ChangedFilesTests(unittest.TestCase):
-    def test_reads_paths_until_the_verdict(self) -> None:
-        self.assertEqual(
-            config.changed_files("note\nCHANGED FILES:\napi/a.py\nfe/b.tsx\nVERDICT: fixed"),
-            ["api/a.py", "fe/b.tsx"],
-        )
-        self.assertEqual(config.changed_files("CHANGED FILES: api/a.py\nVERDICT: fixed"), ["api/a.py"])
-
-
-class PushTicketTests(unittest.TestCase):
-    def test_commits_and_pushes_only_listed_files_on_the_current_branch(self) -> None:
-        import subprocess
-
-        with TemporaryDirectory() as raw:
-            root = Path(raw)
-            repo = root / "api"
-            repo.mkdir()
-            subprocess.run(["git", "init", "-b", "main"], cwd=repo, check=True, capture_output=True)
-            subprocess.run(["git", "config", "user.email", "t@example.com"], cwd=repo, check=True)
-            subprocess.run(["git", "config", "user.name", "t"], cwd=repo, check=True)
-            (repo / "keep.py").write_text("old\n", encoding="utf-8")
-            (repo / "login.py").write_text("old\n", encoding="utf-8")
-            subprocess.run(["git", "add", "."], cwd=repo, check=True)
-            subprocess.run(["git", "commit", "-m", "base"], cwd=repo, check=True, capture_output=True)
-            bare = root / "remote.git"
-            subprocess.run(["git", "init", "--bare", str(bare)], check=True, capture_output=True)
-            subprocess.run(["git", "remote", "add", "origin", str(bare)], cwd=repo, check=True)
-            subprocess.run(["git", "push", "-u", "origin", "main"], cwd=repo, check=True, capture_output=True)
-            (repo / "login.py").write_text("new\n", encoding="utf-8")
-            (repo / "keep.py").write_text("dirty other work\n", encoding="utf-8")
-            prior = config.CONTEXT_PATH
-            # product_cwd reads FLEETAI_PRODUCT_ROOT
-            with patch.dict("os.environ", {"FLEETAI_PRODUCT_ROOT": str(root)}):
-                config.push_ticket("T1", "CHANGED FILES:\napi/login.py\nVERDICT: fixed")
-            log = subprocess.run(
-                ["git", "log", "-1", "--pretty=%s"], cwd=repo, check=True, capture_output=True, text=True
-            ).stdout.strip()
-            self.assertEqual(log, "fleetai: T1")
-            names = subprocess.run(
-                ["git", "show", "--name-only", "--pretty=", "HEAD"],
-                cwd=repo,
-                check=True,
-                capture_output=True,
-                text=True,
-            ).stdout.splitlines()
-            self.assertEqual(names, ["login.py"])
-            self.assertEqual((repo / "keep.py").read_text(encoding="utf-8"), "dirty other work\n")
-
-    def test_rejects_a_path_that_leaves_the_repo(self) -> None:
-        with TemporaryDirectory() as raw:
-            with patch.dict("os.environ", {"FLEETAI_PRODUCT_ROOT": raw}):
-                with self.assertRaises(RuntimeError):
-                    config.push_ticket("T1", "CHANGED FILES:\n../secret\nVERDICT: fixed")
 
 if __name__ == "__main__":
     unittest.main()

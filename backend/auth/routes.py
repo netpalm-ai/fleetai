@@ -200,10 +200,11 @@ def post_totp_disable(
 def post_password_forgot(
     body: ForgotBody,
     background: BackgroundTasks,
+    request: Request,
     product: Product = Depends(get_product),
     _: None = Depends(require_csrf),
 ) -> dict:
-    background.add_task(request_password_reset, product, body.email)
+    background.add_task(request_password_reset, product, body.email, _client(request)[0])
     return {"sent": True}
 
 

@@ -29,7 +29,11 @@ export function VerifyPage() {
         <h1>Verify email</h1>
         {status === "wait" ? <p className="muted">Confirming your email…</p> : null}
         {status === "ok" ? <p>Email verified. You can sign in.</p> : null}
-        {status === "bad" ? <p className="form-error">This verification link is invalid or expired.</p> : null}
+        {status === "bad" ? (
+          <p className="form-error" role="alert">
+            This verification link is invalid or expired.
+          </p>
+        ) : null}
         <p className="auth-foot">
           <Link to="/login">Sign in</Link>
         </p>

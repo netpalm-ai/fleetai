@@ -11,7 +11,7 @@ import pyotp
 from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 
-import api
+import auth.app as auth_api
 import db
 from auth.service import LOGIN_MAX_FAILURES, Product
 from auth.sessions import COOKIE_NAME, cleanup, cookie_secure
@@ -51,7 +51,7 @@ class AuthTests(unittest.TestCase):
         verification = patch("auth.service.emails.send_verification_email")
         self.verification_email = verification.start()
         self.addCleanup(verification.stop)
-        self.cm = TestClient(api.app)
+        self.cm = TestClient(auth_api.app)
         self.client = self.cm.__enter__()
         with db.get_pool().connection() as conn:
             conn.execute("TRUNCATE users CASCADE")
@@ -103,6 +103,9 @@ class AuthTests(unittest.TestCase):
             headers=CSRF,
         )
         self.assertEqual(blocked.status_code, 403)
+        with db.get_pool().connection() as conn:
+            event = conn.execute("SELECT event FROM auth_events").fetchone()
+        self.assertEqual(event["event"], "login_unverified")
         self._verify()
         logged = self.client.post(
             "/auth/login",
@@ -283,6 +286,9 @@ class AuthTests(unittest.TestCase):
         )
         self.assertEqual(disabled_login.status_code, 401)
         self.assertEqual(disabled_login.json()["detail"], "invalid credentials")
+        with db.get_pool().connection() as conn:
+            event = conn.execute("SELECT event FROM auth_events ORDER BY at DESC LIMIT 1").fetchone()
+        self.assertEqual(event["event"], "login_disabled")
 
     def test_register_emails_a_verification_token(self) -> None:
         with patch("auth.service.emails.send_verification_email") as send:
@@ -489,6 +495,11 @@ class AuthTests(unittest.TestCase):
                 self.assertEqual(answer.status_code, 202)
             send.assert_not_called()
             self.client.post("/auth/password/forgot", json={"email": ADA}, headers=CSRF)
+        with db.get_pool().connection() as conn:
+            requested = conn.execute(
+                "SELECT count(*) AS n FROM auth_events WHERE event = 'password_reset_requested'"
+            ).fetchone()["n"]
+        self.assertEqual(requested, 2)
         product_name, to, token, valid_minutes = send.call_args.args
         self.assertEqual((product_name, to, valid_minutes), ("FleetAI", ADA, 60))
         self.assertTrue(token)
@@ -509,6 +520,11 @@ class AuthTests(unittest.TestCase):
             "/auth/password/reset", json={"token": token, "password": "another-password-1"}, headers=CSRF
         )
         self.assertEqual(again.status_code, 400)
+        with db.get_pool().connection() as conn:
+            failed = conn.execute(
+                "SELECT count(*) AS n FROM auth_events WHERE event = 'password_reset_failed'"
+            ).fetchone()["n"]
+        self.assertEqual(failed, 0)
         old = self.client.post("/auth/login", json={"email": ADA, "password": PASSWORD}, headers=CSRF)
         self.assertEqual(old.status_code, 401)
         new = self.client.post(
@@ -528,6 +544,11 @@ class AuthTests(unittest.TestCase):
             conn.commit()
         body = {"token": token, "password": "brand-new-password"}
         self.assertEqual(self.client.post("/auth/password/reset", json=body, headers=CSRF).status_code, 400)
+        with db.get_pool().connection() as conn:
+            failed = conn.execute(
+                "SELECT event FROM auth_events WHERE event = 'password_reset_failed'"
+            ).fetchone()
+        self.assertEqual(failed["event"], "password_reset_failed")
         with patch("auth.service.emails.send_password_reset_email") as send:
             self.client.post("/auth/password/forgot", json={"email": ADA}, headers=CSRF)
         _, _, fresh, _ = send.call_args.args
@@ -616,6 +637,9 @@ class AuthTests(unittest.TestCase):
         self.assertEqual(locked.status_code, 429)
         self.assertEqual(locked.json()["detail"], "too many attempts")
         with db.get_pool().connection() as conn:
+            event = conn.execute("SELECT event FROM auth_events ORDER BY at DESC LIMIT 1").fetchone()
+        self.assertEqual(event["event"], "login_locked")
+        with db.get_pool().connection() as conn:
             conn.execute("UPDATE users SET login_locked_until = now() - interval '1 second'")
             conn.commit()
         self.assertEqual(self.client.post("/auth/login", json=login, headers=CSRF).status_code, 200)
@@ -647,12 +671,17 @@ class AuthTests(unittest.TestCase):
                 conn.commit()
             self.client.post("/auth/password/forgot", json={"email": ADA}, headers=CSRF)
             self.assertEqual(send.call_count, 2)
+        with db.get_pool().connection() as conn:
+            requested = conn.execute(
+                "SELECT count(*) AS n FROM auth_events WHERE event = 'password_reset_requested'"
+            ).fetchone()["n"]
+        self.assertEqual(requested, 3)
 
     def test_security_events_are_recorded_with_the_client_address(self) -> None:
         self.client.post("/auth/register", json=_reg(ADA), headers=CSRF)
         self._verify()
         login = {"email": ADA, "password": PASSWORD}
-        client = TestClient(api.app, client=("203.0.113.9", 50000))
+        client = TestClient(auth_api.app, client=("203.0.113.9", 50000))
         client.post("/auth/login", json={**login, "password": "nope-nope-nope"}, headers=CSRF)
         client.post("/auth/login", json=login, headers=CSRF)
         setup = client.post("/auth/totp/setup", headers=CSRF)
@@ -680,6 +709,7 @@ class AuthTests(unittest.TestCase):
                 "second_factor_failed",
                 "totp_disabled",
                 "password_changed",
+                "password_reset_requested",
                 "password_reset",
             ],
         )
@@ -695,7 +725,7 @@ class AuthTests(unittest.TestCase):
             conn.commit()
         self._signed_in_user(ADA)
         self.assertEqual(self.client.get("/auth/me").json()["registered_product"], "fleetai")
-        with patch.object(api.app.state, "auth_product", Product(id="notes", name="Notes", signup_tier="free")):
+        with patch.object(auth_api.app.state, "auth_product", Product(id="notes", name="Notes", signup_tier="free")):
             taken = self.client.post("/auth/register", json=_reg(ADA, username="ada2"), headers=CSRF)
             self.assertEqual(taken.status_code, 409)
             self.assertEqual(self.client.get("/auth/me").json()["registered_product"], "")
@@ -765,7 +795,7 @@ class AuthTests(unittest.TestCase):
             headers=CSRF,
         )
         self.assertEqual(new.status_code, 200)
-        self.assertEqual(self.client.get("/tickets").status_code, 200)
+        self.assertEqual(self.client.get("/auth/me").status_code, 200)
 
 
 class CookieTests(unittest.TestCase):

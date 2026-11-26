@@ -89,10 +89,6 @@ def get_tickets(user_id: UUID, session_id: UUID | None = None) -> list[dict]:
     )
     if body.startswith("```"):
         body = body.split("\n", 1)[1].removesuffix("```").strip()
-    try:
-        extracted = json.loads(body)
-    except json.JSONDecodeError as exc:
-        raise RuntimeError("ticket model did not return JSON") from exc
-    tickets = apply_workflow(normalize_tickets(extracted), intakes.open_tickets(user_id), solved)
+    tickets = apply_workflow(normalize_tickets(json.loads(body)), intakes.open_tickets(user_id), solved)
     intakes.sync_tickets(user_id, session_id, tickets)
     return tickets

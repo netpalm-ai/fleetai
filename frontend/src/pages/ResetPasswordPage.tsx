@@ -1,23 +1,16 @@
-import { FormEvent, useState } from "react";
+import { FormEvent, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { ApiError, request } from "../api/client";
 import { BrandMark } from "../components/BrandMark";
-
-const MIN_PASSWORD = 12;
-const MAX_PASSWORD = 128;
-const PASSWORD_RULE = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).{12,128}$/;
-const PASSWORD_RULE_TEXT =
-  "Use 12 to 128 characters with an uppercase letter, a lowercase letter, a number, and a symbol.";
-
-function acceptablePassword(password: string): boolean {
-  return password.length >= MIN_PASSWORD && password.length <= MAX_PASSWORD && PASSWORD_RULE.test(password);
-}
+import { MAX_PASSWORD, MIN_PASSWORD, PASSWORD_LENGTH_TEXT, acceptablePassword } from "../session";
 
 export function ResetPasswordPage() {
   const [params] = useSearchParams();
   const token = (params.get("token") ?? "").trim();
   const [done, setDone] = useState(false);
   const [error, setError] = useState<string | null>(token ? null : "This reset link is invalid.");
+  const [pending, setPending] = useState(false);
+  const lock = useRef(false);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -33,9 +26,14 @@ export function ResetPasswordPage() {
       return;
     }
     if (!acceptablePassword(password)) {
-      setError(PASSWORD_RULE_TEXT);
+      setError(PASSWORD_LENGTH_TEXT);
       return;
     }
+    if (lock.current) {
+      return;
+    }
+    lock.current = true;
+    setPending(true);
     setError(null);
     try {
       await request<void>("/auth/password/reset", {
@@ -45,18 +43,21 @@ export function ResetPasswordPage() {
       setDone(true);
     } catch (err: unknown) {
       if (err instanceof ApiError && err.status === 422) {
-        setError(PASSWORD_RULE_TEXT);
+        setError(PASSWORD_LENGTH_TEXT);
       } else if (err instanceof ApiError && err.status === 400) {
         setError("This reset link is invalid or expired.");
       } else {
         setError("Reset failed.");
       }
+    } finally {
+      lock.current = false;
+      setPending(false);
     }
   }
 
   return (
     <div className="auth">
-      <form className="auth-card" onSubmit={onSubmit} noValidate>
+      <form className="auth-card" onSubmit={(event) => void onSubmit(event)} noValidate>
         <BrandMark large />
         <h1>Choose a new password</h1>
         {done ? <p>Password changed. You can sign in.</p> : null}
@@ -73,7 +74,7 @@ export function ResetPasswordPage() {
                 autoFocus
               />
             </label>
-            <p className="muted">{PASSWORD_RULE_TEXT}</p>
+            <p className="muted">{PASSWORD_LENGTH_TEXT}</p>
             <label className="field">
               Confirm password
               <input
@@ -84,12 +85,16 @@ export function ResetPasswordPage() {
                 maxLength={MAX_PASSWORD}
               />
             </label>
-            <button className="btn btn-primary btn-block" type="submit">
+            <button className="btn btn-primary btn-block" type="submit" disabled={pending}>
               Change password
             </button>
           </>
         ) : null}
-        {error ? <p className="form-error">{error}</p> : null}
+        {error ? (
+          <p className="form-error" role="alert">
+            {error}
+          </p>
+        ) : null}
         <p className="auth-foot">
           <Link to="/login">Sign in</Link>
         </p>

@@ -39,22 +39,22 @@ textarea, optional project.md context, then **Resolve tickets**. That posts
 `/api/v1/tickets/inputs` then `/api/v1/execute`, polls `/api/v1/jobs/{id}`, and
 lists tickets from `GET /api/v1/tickets`. No marketing hero.
 
-`/settings` has Account and Connectors tabs. Account shows how long handled
-tickets are kept (`GET /api/v1/settings`). Only a paid user can change it, as a
-number of days or keep forever (`PUT /api/v1/settings`). Connectors is where a
-customer connects GitHub. Do not mention branches, clones, or server setup there.
+Signed-in pages use a left sidebar (`AppShell`): Tickets, Connectors, Settings.
+GitHub lives only under Connectors, never in the top bar. `/settings` is account
+settings (`GET/PUT /api/v1/settings`). `/connectors` is where a customer connects
+GitHub. Do not mention branches, clones, or server setup there.
 
 ## Layout
 
 ```
 src/api/client.ts          prefixes `/api/v1` (not a folder); cookie + CSRF
-src/components/AppHeader.tsx signed-in header: Settings link, Sign out
+src/components/AppShell.tsx signed-in sidebar + username menu
 src/components/BrandMark.tsx
 src/data/termsOfService.ts mock Terms of Service (only TOS source)
 src/pages/HomePage.tsx     `/` product intro
 src/pages/LoginPage.tsx    `/login` → POST /api/v1/auth/login
 src/pages/SignUpPage.tsx   `/signup` → POST /api/v1/auth/register
-src/pages/SettingsPage.tsx `/settings` → GET/PUT /api/v1/settings
+src/pages/SettingsPage.tsx `/settings` account; `/connectors` GitHub
 src/components/AuthenticatorSetup.tsx  Settings section → POST /api/v1/auth/totp/setup, /enable, /disable
 src/pages/ForgotPasswordPage.tsx  `/forgot` → POST /api/v1/auth/password/forgot
 src/pages/ResetPasswordPage.tsx   `/reset?token=` → POST /api/v1/auth/password/reset
@@ -75,12 +75,13 @@ passwords or accounts in localStorage. `SessionProvider` signs the user out afte
 `idle_limit_minutes` (from `/auth/me`) without input and shows `SessionExpired`, a
 blurred overlay with a Sign in button. A 401 from a page calls `expire()` to show the
 same dialog. Routes: `/` intro, `/login`, `/signup`,
-`/terms`, `/tickets`, `/settings`.
+`/terms`, `/tickets`, `/connectors`, `/settings`.
 
 ## Backend
 
 Browser calls go through `/api/v1/...`. `v1` is a URL prefix, not a directory.
-Vite (dev) strips `/api/v1` and proxies to `127.0.0.1:8000`. The frontend
-image strips `/api/v1` and proxies to the `backend` service. A push that only
-changes `frontend/` deploys that image and leaves the API running. Types must
-match `backend/api.py`. No invented API routes.
+Vite (dev) and nginx send `/api/v1/auth` to the auth service (`127.0.0.1:8001` /
+`auth:8000`) and other `/api/v1` paths to the ticket API (`127.0.0.1:8000` /
+`backend:8000`). A push that only changes `frontend/` deploys that image and
+leaves auth and the API running. Types must match `backend/api.py` and
+`backend/auth`. No invented API routes.

@@ -1,4 +1,4 @@
-import { FormEvent, useState } from "react";
+import { FormEvent, useRef, useState } from "react";
 import { Link, Navigate } from "react-router-dom";
 import { BrandMark } from "../components/BrandMark";
 import { useSession } from "../session";
@@ -8,6 +8,8 @@ export function SignUpPage() {
   const [accepted, setAccepted] = useState(false);
   const [created, setCreated] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
+  const lock = useRef(false);
 
   if (!ready) {
     return null;
@@ -33,12 +35,22 @@ export function SignUpPage() {
       setError("Passwords do not match.");
       return;
     }
-    const message = await signUp(firstName, lastName, handle, name, password, accepted);
-    if (message) {
-      setError(message);
+    if (lock.current) {
       return;
     }
-    setCreated(true);
+    lock.current = true;
+    setPending(true);
+    try {
+      const message = await signUp(firstName, lastName, handle, name, password, accepted);
+      if (message) {
+        setError(message);
+        return;
+      }
+      setCreated(true);
+    } finally {
+      lock.current = false;
+      setPending(false);
+    }
   }
 
   if (created) {
@@ -58,7 +70,7 @@ export function SignUpPage() {
 
   return (
     <div className="auth">
-      <form className="auth-card" onSubmit={onSubmit}>
+      <form className="auth-card" onSubmit={(event) => void onSubmit(event)}>
         <BrandMark large />
         <h1>Create an account</h1>
         <label className="field">
@@ -116,8 +128,12 @@ export function SignUpPage() {
             I have read and accept the <Link to="/terms">Terms of Service</Link>.
           </span>
         </label>
-        {error ? <p className="form-error">{error}</p> : null}
-        <button className="btn btn-primary btn-block" type="submit">
+        {error ? (
+          <p className="form-error" role="alert">
+            {error}
+          </p>
+        ) : null}
+        <button className="btn btn-primary btn-block" type="submit" disabled={pending}>
           Sign up
         </button>
         <p className="auth-foot">

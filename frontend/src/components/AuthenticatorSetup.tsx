@@ -121,7 +121,11 @@ export function AuthenticatorSetup({ onError }: { onError: (err: unknown) => voi
             Authenticator or recovery code
             <input name="code" inputMode="numeric" autoComplete="one-time-code" />
           </label>
-          {formError ? <p className="form-error">{formError}</p> : null}
+          {formError ? (
+            <p className="form-error" role="alert">
+              {formError}
+            </p>
+          ) : null}
           <button className="btn btn-primary btn-block" type="submit">
             Turn off
           </button>
@@ -147,7 +151,11 @@ export function AuthenticatorSetup({ onError }: { onError: (err: unknown) => voi
             Code from the app
             <input name="code" inputMode="numeric" autoComplete="one-time-code" />
           </label>
-          {formError ? <p className="form-error">{formError}</p> : null}
+          {formError ? (
+            <p className="form-error" role="alert">
+              {formError}
+            </p>
+          ) : null}
           <button className="btn btn-primary btn-block" type="submit">
             Turn on
           </button>

@@ -90,6 +90,7 @@ jobs:
           esac
           TAG="${GITHUB_SHA:0:6}"
           test "${#TAG}" -eq 6
+          export AUTH_IMAGE="flai-${ENV_NAME}-auth-global:${TAG}"
           export BACKEND_IMAGE="flai-${ENV_NAME}-be-global:${TAG}"
           export FRONTEND_IMAGE="flai-${ENV_NAME}-fe-global:${TAG}"
           echo "frontend ${FRONTEND_IMAGE}"

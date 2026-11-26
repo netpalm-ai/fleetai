@@ -18,6 +18,7 @@ import config
 import db
 import connections
 from auth.sessions import COOKIE_NAME
+from tests.signing import register_verify_login
 
 CSRF = {"X-Requested-With": "fleetai"}
 EMAIL = "ada@example.com"
@@ -41,23 +42,9 @@ class GithubConnectTests(unittest.TestCase):
         with db.get_pool().connection() as conn:
             conn.execute("TRUNCATE users CASCADE")
             conn.commit()
-        with patch("auth.service.emails.send_verification_email") as send:
-            created = self.client.post(
-                "/auth/register",
-                json={
-                    "username": "ada",
-                    "email": EMAIL,
-                    "first_name": "Ada",
-                    "last_name": "Lovelace",
-                    "password": PASSWORD,
-                    "tos_accepted": True,
-                },
-                headers=CSRF,
-            )
-        self.user_id = UUID(created.json()["id"])
-        self.client.post("/auth/verify", json={"token": send.call_args.args[2]}, headers=CSRF)
-        logged = self.client.post("/auth/login", json={"email": EMAIL, "password": PASSWORD}, headers=CSRF)
-        self.assertEqual(logged.status_code, 200)
+        self.user_id = register_verify_login(
+            self.client, email=EMAIL, password=PASSWORD, username="ada"
+        )
         self.assertIn(COOKIE_NAME, self.client.cookies)
 
     def tearDown(self) -> None:
@@ -77,7 +64,7 @@ class GithubConnectTests(unittest.TestCase):
         with patch.object(connections.github, "exchange_code", return_value=("gho_secret", "octocat")):
             done = self.client.get("/github/callback?code=abc&state=state-1", follow_redirects=False)
         self.assertEqual(done.status_code, 302)
-        self.assertIn("/settings?github=connected", done.headers["location"])
+        self.assertIn("/connectors?github=connected", done.headers["location"])
         with db.get_pool().connection() as conn:
             stored = conn.execute(
                 "SELECT github_login, access_token FROM github_connections WHERE user_id = %s",

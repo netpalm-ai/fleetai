@@ -299,38 +299,52 @@ def disable_totp(user_id: UUID, password: str, code: str, ip: str | None) -> Non
         conn.commit()
 
 
-def request_password_reset(product: Product, email: str) -> None:
+def request_password_reset(product: Product, email: str, ip: str | None) -> None:
     name = _normalize_email(email)
     if not valid_email(name):
         return
     token = sessions.new_token()
+    hold = timedelta(minutes=PASSWORD_RESET_MINUTES - PASSWORD_RESET_RESEND_MINUTES)
     with db.get_pool().connection() as conn:
-        row = conn.execute(
+        row = conn.execute("SELECT id FROM users WHERE email = %s", (name,)).fetchone()
+        if row is None:
+            return
+        _record_event(conn, row["id"], "password_reset_requested", ip)
+        sent = conn.execute(
             """
             UPDATE users
             SET password_reset_token_hash = %s, password_reset_expires_at = now() + %s
-            WHERE email = %s AND email_verified AND status = 'active'
+            WHERE id = %s AND email_verified AND status = 'active'
               AND (password_reset_expires_at IS NULL OR password_reset_expires_at < now() + %s)
             RETURNING email
             """,
-            (
-                sessions.token_hash(token),
-                timedelta(minutes=PASSWORD_RESET_MINUTES),
-                name,
-                timedelta(minutes=PASSWORD_RESET_MINUTES - PASSWORD_RESET_RESEND_MINUTES),
-            ),
+            (sessions.token_hash(token), timedelta(minutes=PASSWORD_RESET_MINUTES), row["id"], hold),
         ).fetchone()
         conn.commit()
-    if row is not None:
-        emails.send_password_reset_email(product.name, str(row["email"]), token, PASSWORD_RESET_MINUTES)
+    if sent is not None:
+        emails.send_password_reset_email(product.name, str(sent["email"]), token, PASSWORD_RESET_MINUTES)
 
 
 def reset_password(token: str, new: str, ip: str | None) -> None:
     raw = (token or "").strip()
     if not raw or not passwords.valid_password(new):
         raise AuthError(422, "invalid")
+    digest = sessions.token_hash(raw)
     with db.get_pool().connection() as conn:
         row = conn.execute(
+            """
+            SELECT id, password_reset_expires_at > now() AS current
+            FROM users
+            WHERE password_reset_token_hash = %s
+            """,
+            (digest,),
+        ).fetchone()
+        if row is None or not row["current"]:
+            if row is not None:
+                _record_event(conn, row["id"], "password_reset_failed", ip)
+                conn.commit()
+            raise AuthError(400, "invalid")
+        updated = conn.execute(
             """
             UPDATE users
             SET password_hash = %s,
@@ -339,16 +353,18 @@ def reset_password(token: str, new: str, ip: str | None) -> None:
                 failed_logins = 0,
                 login_locked_until = NULL,
                 updated_at = now()
-            WHERE password_reset_token_hash = %s AND password_reset_expires_at > now()
+            WHERE id = %s AND password_reset_token_hash = %s AND password_reset_expires_at > now()
             RETURNING id
             """,
-            (passwords.hash_password(new), sessions.token_hash(raw)),
+            (passwords.hash_password(new), row["id"], digest),
         ).fetchone()
-        if row is None:
+        if updated is None:
+            _record_event(conn, row["id"], "password_reset_failed", ip)
+            conn.commit()
             raise AuthError(400, "invalid")
-        _record_event(conn, row["id"], "password_reset", ip)
+        _record_event(conn, updated["id"], "password_reset", ip)
         conn.commit()
-    sessions.revoke_user_sessions(row["id"])
+    sessions.revoke_user_sessions(updated["id"])
 
 
 def verify_email(token: str) -> None:
@@ -452,6 +468,8 @@ def login(
             passwords.verify_dummy(password)
             raise AuthError(401, "invalid credentials")
         if row["locked"]:
+            _record_event(conn, row["id"], "login_locked", ip)
+            conn.commit()
             raise AuthError(429, "too many attempts")
         if not passwords.verify_password(row["password_hash"], password):
             _count_failure(
@@ -461,8 +479,12 @@ def login(
             conn.commit()
             raise AuthError(401, "invalid credentials")
         if row["status"] != "active":
+            _record_event(conn, row["id"], "login_disabled", ip)
+            conn.commit()
             raise AuthError(401, "invalid credentials")
         if not row["email_verified"]:
+            _record_event(conn, row["id"], "login_unverified", ip)
+            conn.commit()
             raise AuthError(403, "email not verified")
         if row["totp_enabled"]:
             if not code:

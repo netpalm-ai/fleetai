@@ -18,6 +18,27 @@ services:
       timeout: 3s
       retries: 10
 
+  auth:
+    build:
+      context: .
+      dockerfile: auth/Dockerfile
+    image: ${AUTH_IMAGE:?set AUTH_IMAGE}
+    ports:
+      - "127.0.0.1:8001:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://fleetai:${POSTGRES_PASSWORD}@postgres:5432/fleetai
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      SESSION_IDLE_MIN_LIMIT: ${SESSION_IDLE_MIN_LIMIT:-60}
+      PRODUCT_PUBLIC_BASE_URL: ${PRODUCT_PUBLIC_BASE_URL:-}
+      SMTP_EMAIL_USER: ${SMTP_EMAIL_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      AUTH_SECRET_KEY: ${AUTH_SECRET_KEY:-}
+      NO_REPLY_EMAIL_ALIAS: ${NO_REPLY_EMAIL_ALIAS:-}
+    restart: unless-stopped
+
   backend:
     build:
       context: ./backend
@@ -34,10 +55,7 @@ services:
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
       SESSION_IDLE_MIN_LIMIT: ${SESSION_IDLE_MIN_LIMIT:-60}
       PRODUCT_PUBLIC_BASE_URL: ${PRODUCT_PUBLIC_BASE_URL:-}
-      SMTP_EMAIL_USER: ${SMTP_EMAIL_USER:-}
-      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       AUTH_SECRET_KEY: ${AUTH_SECRET_KEY:-}
-      NO_REPLY_EMAIL_ALIAS: ${NO_REPLY_EMAIL_ALIAS:-}
       GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
       GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
       AWS_REGION: ${AWS_REGION}

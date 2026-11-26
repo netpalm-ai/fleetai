@@ -8,6 +8,10 @@ export default defineConfig({
     port: 8080,
     strictPort: true,
     proxy: {
+      "/api/v1/auth": {
+        target: "http://127.0.0.1:8001",
+        rewrite: (path) => path.replace(/^\/api\/v1/, ""),
+      },
       "/api/v1": {
         target: "http://127.0.0.1:8000",
         rewrite: (path) => path.replace(/^\/api\/v1/, ""),

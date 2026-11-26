@@ -203,6 +203,13 @@ h3 {
   pointer-events: none;
 }
 
+a:focus-visible,
+button:focus-visible,
+.accept input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
 .nav-end {
   display: flex;
   align-items: center;
@@ -212,6 +219,162 @@ h3 {
 .nav-user {
   color: var(--muted);
   font-size: 14px;
+}
+
+.app-shell {
+  display: flex;
+  min-height: 100vh;
+  position: relative;
+  z-index: 1;
+}
+
+.app-sidebar {
+  position: sticky;
+  top: 0;
+  align-self: flex-start;
+  width: 220px;
+  min-height: 100vh;
+  padding: 22px 16px;
+  border-right: 1px solid var(--line-soft);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(12, 10, 7, 0.35));
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+}
+
+.app-sidebar-brand {
+  display: inline-flex;
+  margin: 4px 10px 28px;
+}
+
+.app-sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.app-nav-link {
+  display: block;
+  padding: 10px 14px;
+  border-radius: 14px;
+  color: var(--muted);
+  font-size: 14.5px;
+  font-weight: 500;
+  border: 1px solid transparent;
+}
+
+.app-nav-link:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.app-nav-link.on {
+  color: var(--text);
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
+}
+
+.app-frame {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.app-top {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  height: 64px;
+  padding: 0 28px;
+  border-bottom: 1px solid var(--line-soft);
+  background: var(--header-bg);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+}
+
+.app-top-end {
+  position: relative;
+}
+
+.app-user-btn {
+  min-width: 7rem;
+}
+
+.app-user-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  min-width: 180px;
+  padding: 8px;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.35);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.app-user-menu a,
+.app-user-menu button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.app-user-menu a:hover,
+.app-user-menu button:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.app-content {
+  flex: 1;
+}
+
+.shell-app {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 28px 32px 64px;
+}
+
+@media (max-width: 900px) {
+  .app-shell {
+    flex-direction: column;
+  }
+
+  .app-sidebar {
+    position: static;
+    width: auto;
+    min-height: 0;
+    border-right: 0;
+    border-bottom: 1px solid var(--line-soft);
+    padding: 14px 16px 12px;
+  }
+
+  .app-sidebar-brand {
+    margin: 0 4px 12px;
+  }
+
+  .app-sidebar-nav {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .shell-app {
+    padding: 22px 20px 48px;
+  }
 }
 
 .nav-wide,
@@ -448,7 +611,7 @@ h3 {
   font-size: 12px;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: var(--muted-2);
+  color: var(--muted);
   font-weight: 600;
 }
 
@@ -492,6 +655,16 @@ h3 {
   border-color: var(--accent-strong);
 }
 
+.field-help {
+  margin: 16px 0 0;
+  color: var(--muted);
+  font-size: 14.5px;
+  font-weight: 400;
+  letter-spacing: 0;
+  line-height: 1.45;
+  text-transform: none;
+}
+
 .studio-error {
   margin: 0 0 16px;
 }
@@ -528,10 +701,6 @@ h3 {
   display: flex;
   gap: 8px;
   margin: 10px 0 8px;
-}
-
-.settings-tabs {
-  margin: 0 0 22px;
 }
 
 .seg-btn {

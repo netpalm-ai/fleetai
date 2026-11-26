@@ -1,5 +1,13 @@
 export const API_BASE = "/api/v1";
 
+const SESSION_EXPIRED = "unauthorized";
+
+let onUnauthorized: (() => void) | null = null;
+
+export function setUnauthorizedHandler(handler: (() => void) | null): void {
+  onUnauthorized = handler;
+}
+
 export class ApiError extends Error {
   status: number;
 
@@ -7,6 +15,13 @@ export class ApiError extends Error {
     super(detail || path + " " + String(status));
     this.status = status;
   }
+}
+
+export function requestError(err: unknown, fallback: string): string | null {
+  if (err instanceof ApiError && err.status === 401 && err.message === SESSION_EXPIRED) {
+    return null;
+  }
+  return err instanceof Error ? err.message : fallback;
 }
 
 function url(path: string): string {
@@ -51,6 +66,9 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
       if (typeof value === "string") {
         detail = value;
       }
+    }
+    if (response.status === 401 && detail === SESSION_EXPIRED) {
+      onUnauthorized?.();
     }
     throw new ApiError(href, response.status, detail);
   }

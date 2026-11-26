@@ -1,0 +1,124 @@
+name: auth
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "auth/**"
+      - "backend/auth/**"
+      - "backend/db.py"
+      - "backend/emails.py"
+      - "backend/migrations/**"
+      - "docker-compose.yml"
+      - ".github/workflows/auth.yml"
+  pull_request:
+    paths:
+      - "auth/**"
+      - "backend/auth/**"
+      - "backend/db.py"
+      - "backend/emails.py"
+      - "backend/migrations/**"
+      - "docker-compose.yml"
+      - ".github/workflows/auth.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: fleetai
+          POSTGRES_DB: fleetai
+          POSTGRES_PASSWORD: test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U fleetai -d fleetai"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      FLEETAI_PRODUCT_ROOT: /tmp/product
+      DATABASE_URL: postgresql://fleetai:test@127.0.0.1:5432/fleetai
+      COOKIE_SECURE: "false"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install
+        run: python -c "import pathlib, subprocess, tomllib; subprocess.check_call(['pip', 'install', '--quiet', 'pytest', *tomllib.loads(pathlib.Path('pyproject.toml').read_text())['project']['dependencies']])"
+      - name: Test auth
+        run: python -m pytest tests/test_auth.py -q
+
+  deploy:
+    needs: [test]
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: [self-hosted, Linux, i9]
+    concurrency:
+      group: fleetai-i9
+      cancel-in-progress: false
+    env:
+      FLEETAI_PRODUCT_ROOT: /home/minh/repos/hba
+      OLLAMA_HOST: http://host.docker.internal:11434
+      COOKIE_SECURE: "true"
+      SESSION_IDLE_MIN_LIMIT: ${{ vars.SESSION_IDLE_MIN_LIMIT }}
+      PRODUCT_PUBLIC_BASE_URL: ${{ vars.PRODUCT_PUBLIC_BASE_URL }}
+      SMTP_EMAIL_USER: ${{ vars.SMTP_EMAIL_USER }}
+      NO_REPLY_EMAIL_ALIAS: ${{ vars.NO_REPLY_EMAIL_ALIAS }}
+      SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+      AUTH_SECRET_KEY: ${{ secrets.AUTH_SECRET_KEY }}
+      GITHUB_CLIENT_ID: ${{ secrets.APP_CLIENT_ID }}
+      GITHUB_CLIENT_SECRET: ${{ secrets.APP_CLIENT_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy
+        run: |
+          mkdir -p /home/deploy/fleetai
+          rsync -a --delete \
+            --exclude .git/ \
+            --exclude .env \
+            --exclude frontend/node_modules/ \
+            --exclude frontend/dist/ \
+            ./ /home/deploy/fleetai/
+          cd /home/deploy/fleetai
+          case "${GITHUB_REF}" in
+            refs/heads/main) ENV_NAME=prod ;;
+            *) echo "unsupported branch ${GITHUB_REF}" >&2; exit 1 ;;
+          esac
+          TAG="${GITHUB_SHA:0:6}"
+          test "${#TAG}" -eq 6
+          export AUTH_IMAGE="flai-${ENV_NAME}-auth-global:${TAG}"
+          export BACKEND_IMAGE="flai-${ENV_NAME}-be-global:${TAG}"
+          export FRONTEND_IMAGE="flai-${ENV_NAME}-fe-global:${TAG}"
+          echo "auth ${AUTH_IMAGE}"
+          docker compose up -d --build postgres auth
+          docker image ls --format '{{.Repository}}:{{.Tag}}' \
+            | grep "^flai-${ENV_NAME}-auth-global:" \
+            | grep -v ":${TAG}$" \
+            | xargs -r docker image rm || true
+          docker container prune -f
+          docker image prune -f
+      - name: Health
+        run: |
+          check() {
+            local url=$1
+            for i in 1 2 3 4 5 6 7 8 9 10; do
+              if curl -fsS "$url"; then
+                echo
+                return 0
+              fi
+              sleep 2
+            done
+            echo "unhealthy $url" >&2
+            return 1
+          }
+          check http://127.0.0.1:8001/health

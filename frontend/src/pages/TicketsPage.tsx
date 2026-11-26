@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type DragEvent } from "react";
-import { Navigate } from "react-router-dom";
-import { ApiError, getJson, request } from "../api/client";
-import { AppHeader } from "../components/AppHeader";
+import { ApiError, getJson, request, requestError } from "../api/client";
+import { AppShell } from "../components/AppShell";
 import { useSession } from "../session";
 import type { Job, Ticket } from "../types";
 
@@ -68,7 +67,7 @@ function fileToBase64(file: File): Promise<string> {
 }
 
 export function TicketsPage() {
-  const { username, ready, expire } = useSession();
+  const { username } = useSession();
   const [email, setEmail] = useState("");
   const [listText, setListText] = useState("");
   const [context, setContext] = useState("");
@@ -88,10 +87,6 @@ export function TicketsPage() {
     getJson<Ticket[]>("/tickets")
       .then(setTickets)
       .catch((err: unknown) => {
-        if (err instanceof ApiError && err.status === 401) {
-          expire();
-          return;
-        }
         if (err instanceof ApiError && err.status === 403) {
           setError("This account cannot use tickets.");
           return;
@@ -100,9 +95,12 @@ export function TicketsPage() {
           setError("workflow busy");
           return;
         }
-        setError(err instanceof Error ? err.message : "request failed");
+        const message = requestError(err, "request failed");
+        if (message) {
+          setError(message);
+        }
       });
-  }, [expire]);
+  }, []);
 
   useEffect(() => {
     if (username) {
@@ -143,11 +141,10 @@ export function TicketsPage() {
         .catch((err: unknown) => {
           setBusy(false);
           stopPoll();
-          if (err instanceof ApiError && err.status === 401) {
-            expire();
-            return;
+          const message = requestError(err, "job poll failed");
+          if (message) {
+            setError(message);
           }
-          setError(err instanceof Error ? err.message : "job poll failed");
         });
     };
     tick();
@@ -193,11 +190,10 @@ export function TicketsPage() {
       await request<Ticket>("/tickets/" + ticketId + "/complete", { method: "POST" });
       load();
     } catch (err: unknown) {
-      if (err instanceof ApiError && err.status === 401) {
-        expire();
-        return;
+      const message = requestError(err, "complete failed");
+      if (message) {
+        setError(message);
       }
-      setError(err instanceof Error ? err.message : "complete failed");
     }
   }
 
@@ -222,11 +218,10 @@ export function TicketsPage() {
     } catch (err: unknown) {
       setOpenId(null);
       setReport(null);
-      if (err instanceof ApiError && err.status === 401) {
-        expire();
-        return;
+      const message = requestError(err, "Could not load the report.");
+      if (message) {
+        setError(message);
       }
-      setError(err instanceof Error ? err.message : "Could not load the report.");
     } finally {
       setReportBusy(false);
     }
@@ -257,35 +252,30 @@ export function TicketsPage() {
       watchJob(started.id);
     } catch (err: unknown) {
       setBusy(false);
-      if (err instanceof ApiError && err.status === 401) {
-        expire();
-        return;
+      const message = requestError(err, "resolve failed");
+      if (message) {
+        setError(message);
       }
-      setError(err instanceof Error ? err.message : "resolve failed");
     }
-  }
-
-  if (!ready) {
-    return null;
-  }
-  if (!username) {
-    return <Navigate to="/login" replace />;
   }
 
   const running = busy || job?.status === "running";
   const activeId = tickets && running ? handlingId(tickets) : null;
 
   return (
-    <>
-      <AppHeader />
-      <main className="shell shell-wide">
+    <AppShell>
+      <main className="shell shell-app">
         <div className="page-head">
           <div>
             <p className="eyebrow">Workspace</p>
             <h1>Resolve tickets</h1>
           </div>
         </div>
-        {error ? <p className="form-error studio-error">{error}</p> : null}
+        {error ? (
+          <p className="form-error studio-error" role="alert">
+            {error}
+          </p>
+        ) : null}
 
         <div className="studio">
           <section className="intake">
@@ -423,6 +413,6 @@ export function TicketsPage() {
           </section>
         </div>
       </main>
-    </>
+    </AppShell>
   );
 }

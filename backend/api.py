@@ -16,7 +16,6 @@ import parser
 import solver
 import verifier
 from auth.deps import get_current_user, require_csrf
-from auth.routes import router as auth_router
 from auth.service import Product, User
 from auth.sessions import cookie_secure, start_cleanup
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request
@@ -44,7 +43,6 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(title="fleetai", version=config.VERSION, lifespan=lifespan)
 app.state.auth_product = FLEETAI
-app.include_router(auth_router, prefix="/auth")
 
 
 def require_tickets(user: User = Depends(get_current_user)) -> User:
@@ -196,7 +194,7 @@ def github_callback(request: Request, code: str = "", state: str = "", error: st
         response.delete_cookie(connections.github.STATE_COOKIE, path="/")
         return response
 
-    failed = finish(RedirectResponse(_page("/settings", "?github=failed"), status_code=302))
+    failed = finish(RedirectResponse(_page("/connectors", "?github=failed"), status_code=302))
     if error or not code:
         return failed
     saved = request.cookies.get(connections.github.STATE_COOKIE) or ""
@@ -213,7 +211,7 @@ def github_callback(request: Request, code: str = "", state: str = "", error: st
         connections.github.save_connection(user.id, login, token)
     except RuntimeError:
         return failed
-    return finish(RedirectResponse(_page("/settings", "?github=connected"), status_code=302))
+    return finish(RedirectResponse(_page("/connectors", "?github=connected"), status_code=302))
 
 
 @app.get("/tickets")

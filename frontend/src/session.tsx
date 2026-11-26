@@ -1,12 +1,14 @@
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { SessionExpired } from "./components/SessionExpired";
-import { ApiError, request } from "./api/client";
+import { ApiError, request, setUnauthorizedHandler } from "./api/client";
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MAX_EMAIL = 254;
-const MIN_PASSWORD = 10;
-const MAX_PASSWORD = 128;
+export const MIN_PASSWORD = 10;
+export const MAX_PASSWORD = 128;
+export const PASSWORD_LENGTH_TEXT = "Password must be 10 to 128 characters.";
 export const CODE_REQUIRED = "Enter the 6-digit code from your authenticator app, or a recovery code.";
+export const CODE_REJECTED = "That code was not accepted.";
 export const TOO_MANY_ATTEMPTS = "Too many attempts. Try again later.";
 const VERIFY_EMAIL_FIRST = "Verify your email before signing in.";
 const PING_MS = 5 * 60_000;
@@ -40,7 +42,6 @@ type SessionValue = {
     tosAccepted: boolean,
   ) => Promise<string | null>;
   signOut: () => Promise<void>;
-  expire: () => void;
 };
 
 const SessionContext = createContext<SessionValue | null>(null);
@@ -49,13 +50,17 @@ export function isEmail(value: string): boolean {
   return EMAIL.test(value) && value.length <= MAX_EMAIL;
 }
 
+export function acceptablePassword(password: string): boolean {
+  return password.length >= MIN_PASSWORD && password.length <= MAX_PASSWORD;
+}
+
 function errorMessage(err: unknown, fallback: string): string {
   if (err instanceof ApiError) {
     if (err.status === 409) {
       return "That account already exists.";
     }
     if (err.status === 401) {
-      return "invalid credentials";
+      return "Wrong email or password.";
     }
     if (err.status === 429) {
       return TOO_MANY_ATTEMPTS;
@@ -73,15 +78,38 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [ready, setReady] = useState(false);
   const [idleMinutes, setIdleMinutes] = useState<number | null>(null);
   const [expired, setExpired] = useState(false);
+  const usernameRef = useRef(username);
+  usernameRef.current = username;
 
   useEffect(() => {
+    setUnauthorizedHandler(() => {
+      if (usernameRef.current) {
+        setExpired(true);
+      }
+    });
+    let active = true;
     request<AuthUser>("/auth/me")
       .then((user) => {
+        if (!active) {
+          return;
+        }
         setUsername(user.username);
         setIdleMinutes(user.idle_limit_minutes);
       })
-      .catch(() => setUsername(null))
-      .finally(() => setReady(true));
+      .catch(() => {
+        if (active) {
+          setUsername(null);
+        }
+      })
+      .finally(() => {
+        if (active) {
+          setReady(true);
+        }
+      });
+    return () => {
+      active = false;
+      setUnauthorizedHandler(null);
+    };
   }, []);
 
   useEffect(() => {
@@ -101,11 +129,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       timer = window.setTimeout(lapse, (idleMinutes ?? 0) * 60_000);
       if (Date.now() - lastPing >= PING_MS) {
         lastPing = Date.now();
-        request<AuthUser>("/auth/me").catch((err: unknown) => {
-          if (err instanceof ApiError && err.status === 401) {
-            setExpired(true);
-          }
-        });
+        request<AuthUser>("/auth/me").catch(() => undefined);
       }
     }
 
@@ -141,8 +165,14 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           if (err instanceof ApiError && err.status === 403) {
             return VERIFY_EMAIL_FIRST;
           }
-          if (err instanceof ApiError && (err.status === 401 || err.status === 422)) {
-            return "invalid credentials";
+          if (err instanceof ApiError && err.status === 401 && code.trim()) {
+            return CODE_REJECTED;
+          }
+          if (err instanceof ApiError && err.status === 401) {
+            return "Wrong email or password.";
+          }
+          if (err instanceof ApiError && err.status === 422) {
+            return "Enter your email and password.";
           }
           return "Sign in failed.";
         }
@@ -171,8 +201,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         if (!isEmail(name)) {
           return "Enter a valid email address.";
         }
-        if (password.length < MIN_PASSWORD || password.length > MAX_PASSWORD) {
-          return "Password must be 10 to 128 characters.";
+        if (!acceptablePassword(password)) {
+          return PASSWORD_LENGTH_TEXT;
         }
         if (!tosAccepted) {
           return "Accept the Terms of Service to create an account.";
@@ -202,9 +232,6 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         }
         setUsername(null);
         setExpired(false);
-      },
-      expire() {
-        setExpired(true);
       },
     }),
     [username, ready],
