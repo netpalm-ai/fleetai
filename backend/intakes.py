@@ -42,17 +42,19 @@ def put(
     intake_type: str,
     fmt: str,
     data: bytes,
+    replace: bool = True,
 ) -> UUID:
     intake_id = uuid4()
     with db.get_pool().connection() as conn:
-        conn.execute(
-            """
-            UPDATE intakes
-            SET status = 'deactivated', deactivated_at = now()
-            WHERE user_id = %s AND type = %s AND status = 'active'
-            """,
-            (user_id, intake_type),
-        )
+        if replace:
+            conn.execute(
+                """
+                UPDATE intakes
+                SET status = 'deactivated', deactivated_at = now()
+                WHERE user_id = %s AND type = %s AND status = 'active'
+                """,
+                (user_id, intake_type),
+            )
         conn.execute(
             """
             INSERT INTO intakes (
@@ -81,6 +83,9 @@ def active_content(user_id: UUID, intake_type: str) -> tuple[str, bytes] | None:
             """
             SELECT format, content FROM intakes
             WHERE user_id = %s AND type = %s AND status = 'active'
+              AND format IN ('txt', 'pdf', 'md')
+            ORDER BY created_at DESC
+            LIMIT 1
             """,
             (user_id, intake_type),
         ).fetchone()
@@ -89,12 +94,26 @@ def active_content(user_id: UUID, intake_type: str) -> tuple[str, bytes] | None:
     return row["format"], bytes(row["content"])
 
 
+def active_images(user_id: UUID) -> list[tuple[str, bytes]]:
+    with db.get_pool().connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT format, content FROM intakes
+            WHERE user_id = %s AND type = %s AND status = 'active'
+              AND format IN ('png', 'jpeg', 'webp')
+            ORDER BY created_at, id
+            """,
+            (user_id, TICKET_LIST),
+        ).fetchall()
+    return [(row["format"], bytes(row["content"])) for row in rows]
+
+
 def _active_ticket_list_id(conn, user_id: UUID) -> UUID | None:
     row = conn.execute(
         """
         SELECT id FROM intakes
         WHERE user_id = %s AND type = %s AND status = 'active'
-        ORDER BY created_at DESC
+        ORDER BY CASE WHEN format IN ('txt', 'pdf') THEN 0 ELSE 1 END, created_at DESC
         LIMIT 1
         """,
         (user_id, TICKET_LIST),

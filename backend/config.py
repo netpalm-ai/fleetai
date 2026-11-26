@@ -48,6 +48,8 @@ def require_env_int(name: str) -> int:
 
 INTAKE_PDF_MAX = 50 * 1024 * 1024
 INTAKE_TEXT_MAX = 512 * 1024
+INTAKE_IMAGE_MAX = 5 * 1024 * 1024
+INTAKE_IMAGE_MAX_COUNT = 8
 ENGINEERING_PATH = ROOT / "codebase" / "engineering.md"
 MAP_PROMPT = """
 This project has no code context. Inspect only this checkout and write `.fleetai/code-context.md`.
@@ -113,6 +115,18 @@ def _require_pdf(pdf: bytes) -> None:
         document.close()
 
 
+def _image_format(data: bytes) -> str:
+    if len(data) > INTAKE_IMAGE_MAX:
+        raise RuntimeError("ticket list image is too large")
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "png"
+    if data.startswith(b"\xff\xd8\xff"):
+        return "jpeg"
+    if len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "webp"
+    raise RuntimeError("ticket list image is invalid")
+
+
 def save_intake(
     email: str,
     list_text: str,
@@ -120,28 +134,41 @@ def save_intake(
     pdf: bytes | None,
     user_id: UUID,
     session_id: UUID | None,
+    images: list[bytes] | None = None,
 ) -> None:
     email = (email or "").strip()
     list_text = (list_text or "").strip()
     context = (context or "").strip()
+    images = list(images or [])
     if "\x00" in email or "\x00" in list_text or "\x00" in context:
         raise RuntimeError("intake text is invalid")
+    if len(images) > INTAKE_IMAGE_MAX_COUNT:
+        raise RuntimeError("too many ticket list images")
     if pdf is not None:
         _require_pdf(pdf)
+    parsed_images = [(_image_format(image), image) for image in images]
+    if (0 if pdf is None else len(pdf)) + sum(len(image) for image in images) > INTAKE_PDF_MAX:
+        raise RuntimeError("ticket list is too large")
     if len(email) > INTAKE_TEXT_MAX or len(list_text) > INTAKE_TEXT_MAX or len(context) > INTAKE_TEXT_MAX:
         raise RuntimeError("intake text is too large")
-    if not email and not list_text and not pdf:
+    if not email and not list_text and not pdf and not parsed_images:
         raise RuntimeError("need an email or a ticket list")
     with workflow_lock(user_id, blocking=False):
         if email:
             intakes.put(user_id, session_id, "email_desc", "txt", (email + "\n").encode("utf-8"))
         else:
             intakes.deactivate(user_id, "email_desc")
+        replace_list = True
         if pdf is not None:
             intakes.put(user_id, session_id, "ticket_list", "pdf", pdf)
+            replace_list = False
         elif list_text:
             intakes.put(user_id, session_id, "ticket_list", "txt", (list_text + "\n").encode("utf-8"))
-        else:
+            replace_list = False
+        for fmt, image in parsed_images:
+            intakes.put(user_id, session_id, "ticket_list", fmt, image, replace=replace_list)
+            replace_list = False
+        if replace_list:
             intakes.deactivate(user_id, "ticket_list")
         if context:
             intakes.put(user_id, session_id, "project_context", "md", (context + "\n").encode("utf-8"))
@@ -594,7 +621,7 @@ def run_step(user_id: UUID, ticket_id: str, want: str, kind: str, make_prompt, n
         code = ensure_code_context(user_id, project_id)
         prompt = make_prompt(ticket, agent_context(code))
         from llm import cursor
-        return prompt, cursor.run(prompt)
+        return prompt, cursor.run(prompt, intakes.active_images(user_id) or None)
 
     if project_id is None:
         prompt, result = _run()

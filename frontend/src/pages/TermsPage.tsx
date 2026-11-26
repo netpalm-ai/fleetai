@@ -1,21 +1,15 @@
 import { Link } from "react-router-dom";
-import { BrandMark } from "../components/BrandMark";
 import { TERMS_SECTIONS, TERMS_TITLE, TERMS_UPDATED } from "../data/termsOfService";
 
 export function TermsPage() {
   return (
     <div className="terms-page">
-      <header className="site-header">
-        <div className="nav">
-          <Link to="/">
-            <BrandMark />
-          </Link>
-          <Link className="btn btn-ghost" to="/signup">
+      <article className="terms-doc">
+        <p>
+          <Link className="btn btn-primary" to="/signup">
             Back to sign up
           </Link>
-        </div>
-      </header>
-      <article className="terms-doc">
+        </p>
         <h1>{TERMS_TITLE}</h1>
         <p className="muted">Updated {TERMS_UPDATED}</p>
         {TERMS_SECTIONS.map((section) => (

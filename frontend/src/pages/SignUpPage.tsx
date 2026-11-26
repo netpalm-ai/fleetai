@@ -1,6 +1,5 @@
 import { FormEvent, useRef, useState } from "react";
 import { Link, Navigate } from "react-router-dom";
-import { BrandMark } from "../components/BrandMark";
 import { acceptablePassword, isEmail, PASSWORD_REJECTED, TOO_MANY_ATTEMPTS, useSession } from "../session";
 
 function focusNamed(form: HTMLFormElement, name: string) {
@@ -28,7 +27,6 @@ export function SignUpPage() {
     return (
       <div className="auth">
         <div className="auth-card">
-          <BrandMark large />
           <p className="muted">Loading…</p>
         </div>
       </div>
@@ -153,7 +151,6 @@ export function SignUpPage() {
     return (
       <div className="auth">
         <div className="auth-card">
-          <BrandMark large />
           <h1>Verify your email</h1>
           <p>Account created. Open the email we sent and follow the link to verify your email.</p>
           <p className="auth-foot">
@@ -167,7 +164,6 @@ export function SignUpPage() {
   return (
     <div className="auth">
       <form className="auth-card" onSubmit={(event) => void onSubmit(event)} noValidate>
-        <BrandMark large />
         <h1>Create an account</h1>
         <label className="field">
           First name
