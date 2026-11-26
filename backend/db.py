@@ -119,6 +119,14 @@ def close_pool() -> None:
         pool = None
 
 
+def refuse_live_wipe(conn) -> None:
+    row = conn.execute("SELECT current_setting('cluster_name', true) AS name").fetchone()
+    if row is None or row["name"] != "fleetai-ci":
+        raise RuntimeError(
+            "refusing to wipe this database. It is not a disposable test database, and the operator has not agreed to delete it."
+        )
+
+
 def get_pool() -> ConnectionPool:
     if pool is None:
         raise RuntimeError("database unavailable")

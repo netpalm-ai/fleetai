@@ -31,20 +31,6 @@ jobs:
     defaults:
       run:
         working-directory: backend
-    services:
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_USER: fleetai
-          POSTGRES_DB: fleetai
-          POSTGRES_PASSWORD: test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U fleetai -d fleetai"
-          --health-interval 5s
-          --health-timeout 3s
-          --health-retries 10
     env:
       FLEETAI_PRODUCT_ROOT: /tmp/product
       DATABASE_URL: postgresql://fleetai:test@127.0.0.1:5432/fleetai
@@ -56,6 +42,24 @@ jobs:
           python-version: "3.13"
       - name: Install
         run: python -c "import pathlib, subprocess, tomllib; subprocess.check_call(['pip', 'install', '--quiet', 'pytest', *tomllib.loads(pathlib.Path('pyproject.toml').read_text())['project']['dependencies']])"
+      - name: Disposable Postgres
+        run: |
+          docker run -d --name fleetai-ci-pg \
+            -e POSTGRES_USER=fleetai \
+            -e POSTGRES_PASSWORD=test \
+            -e POSTGRES_DB=fleetai \
+            -p 127.0.0.1:5432:5432 \
+            postgres:16-alpine \
+            postgres -c cluster_name=fleetai-ci
+          ready=0
+          for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30; do
+            if docker exec fleetai-ci-pg pg_isready -U fleetai -d fleetai; then
+              ready=1
+              break
+            fi
+            sleep 1
+          done
+          test "$ready" = 1
       - name: Test auth
         run: python -m pytest tests/test_auth.py -q
 

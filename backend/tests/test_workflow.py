@@ -13,6 +13,7 @@ from uuid import uuid4
 import pymupdf
 
 import config
+import db
 import parser
 import solver
 import verifier
@@ -394,6 +395,34 @@ class SaveIntakeValidationTests(unittest.TestCase):
     def test_rejects_encrypted_pdf(self) -> None:
         with self.assertRaises(RuntimeError):
             self._save("", "", "", _encrypted_pdf())
+
+
+class Conn:
+    def __init__(self, name: str) -> None:
+        self.name = name
+
+    def execute(self, query: str):
+        class Result:
+            def __init__(self, name: str) -> None:
+                self.name = name
+
+            def fetchone(self):
+                return {"name": self.name}
+
+        return Result(self.name)
+
+
+class WipeGuardTests(unittest.TestCase):
+    def test_refuses_a_live_database(self) -> None:
+        with self.assertRaises(RuntimeError) as raised:
+            db.refuse_live_wipe(Conn(""))
+        self.assertEqual(
+            str(raised.exception),
+            "refusing to wipe this database. It is not a disposable test database, and the operator has not agreed to delete it.",
+        )
+
+    def test_allows_the_disposable_cluster(self) -> None:
+        db.refuse_live_wipe(Conn("fleetai-ci"))
 
 
 if __name__ == "__main__":

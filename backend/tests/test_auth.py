@@ -54,6 +54,7 @@ class AuthTests(unittest.TestCase):
         self.cm = TestClient(auth_api.app)
         self.client = self.cm.__enter__()
         with db.get_pool().connection() as conn:
+            db.refuse_live_wipe(conn)
             conn.execute("TRUNCATE users CASCADE")
             conn.commit()
 
