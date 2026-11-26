@@ -12,6 +12,7 @@ RUN python -c "import pathlib, subprocess, tomllib; subprocess.check_call(['pip'
 COPY backend/db.py backend/emails.py ./
 COPY backend/auth ./auth
 COPY backend/migrations ./migrations
+COPY backend/codebase/code-context.md backend/codebase/code-context.fleetai.md ./codebase/
 COPY auth/main.py ./
 
 RUN useradd --create-home --uid 1000 auth \

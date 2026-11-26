@@ -56,7 +56,7 @@ class ApiTests(unittest.TestCase):
             response = self.client.get("/tickets")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), [{"id": "T1", "status": "unresolved"}])
-        listed.assert_called_once_with(USER.id)
+        listed.assert_called_once_with(USER.id, None)
 
     def test_gets_one_ticket(self) -> None:
         ticket = {"id": "T1", "status": "completed"}

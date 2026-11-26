@@ -140,7 +140,10 @@ def _seed_codebase_contexts(conn) -> None:
         ("Netpalm.AI", "FleetAI", "code-context.fleetai.md", "React, TypeScript, FastAPI, Postgres"),
     )
     for org, product_name, filename, tech_stack in catalog:
-        text = (ROOT / "codebase" / filename).read_text(encoding="utf-8").strip()
+        path = ROOT / "codebase" / filename
+        if not path.is_file():
+            continue
+        text = path.read_text(encoding="utf-8").strip()
         conn.execute(
             """
             INSERT INTO project_contexts (org, product_name, codebase_context, tech_stack)
