@@ -235,7 +235,7 @@ export function TicketsPage() {
       await request<Ticket>("/tickets/" + ticketId + "/complete", { method: "POST" });
       load();
     } catch (err: unknown) {
-      const message = requestError(err, "complete failed");
+      const message = requestError(err, "Could not mark the ticket completed.");
       if (message) {
         setError(message);
       }
@@ -377,7 +377,7 @@ export function TicketsPage() {
               />
             </label>
             <div className="field">
-              Ticket list
+              <label htmlFor="ticket-list">Ticket list</label>
               <div className="seg" role="tablist" aria-label="Ticket list source">
                 <button
                   type="button"
@@ -409,6 +409,7 @@ export function TicketsPage() {
               </div>
               {listMode === "paste" ? (
                 <textarea
+                  id="ticket-list"
                   name="list_text"
                   rows={10}
                   placeholder="Paste the ticket list as raw text."
@@ -484,12 +485,13 @@ export function TicketsPage() {
                               disabled={running}
                               onChange={(event) => toggleSelected(ticket.id, event.target.checked)}
                             />
+                            <span>Resolve</span>
                           </label>
                         ) : null}
                         {ticket.status === "verifying" && !running ? (
                           <button
                             type="button"
-                            className="btn btn-primary"
+                            className="btn btn-ghost"
                             onClick={() => void onComplete(ticket.id)}
                           >
                             Mark completed
@@ -516,7 +518,7 @@ export function TicketsPage() {
             {tickets != null ? (
               <button
                 type="button"
-                className="btn btn-primary btn-block resolve-btn"
+                className="btn btn-ghost btn-block resolve-btn"
                 disabled={running}
                 onClick={() => void startResolve(selected, "Select a ticket.", false)}
               >

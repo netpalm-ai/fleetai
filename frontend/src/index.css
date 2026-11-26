@@ -205,7 +205,9 @@ h3 {
 
 a:focus-visible,
 button:focus-visible,
-.accept input:focus-visible {
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 3px;
 }
@@ -446,7 +448,8 @@ button:focus-visible,
 .connect-grid {
   list-style: none;
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
+  max-width: 280px;
   gap: 12px;
 }
 
@@ -471,12 +474,6 @@ button:focus-visible,
   color: var(--muted);
   font-size: 14.5px;
   line-height: 1.5;
-}
-
-@media (max-width: 720px) {
-  .connect-grid {
-    grid-template-columns: 1fr;
-  }
 }
 
 .muted {
@@ -627,12 +624,6 @@ button:focus-visible,
   font-weight: 400;
   padding: 4px 0 2px;
   width: 100%;
-}
-
-.field input:focus,
-.field select:focus,
-.field textarea:focus {
-  outline: none;
 }
 
 .field textarea {
@@ -838,6 +829,13 @@ button:focus-visible,
   color: var(--accent);
   font-size: 14px;
   margin: 14px 0 0;
+}
+
+.field .form-error {
+  margin: 4px 0 0;
+  letter-spacing: 0;
+  text-transform: none;
+  font-weight: 400;
 }
 
 .with-icon {

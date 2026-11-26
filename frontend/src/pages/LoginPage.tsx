@@ -1,11 +1,27 @@
 import { FormEvent, useRef, useState } from "react";
 import { Link, Navigate } from "react-router-dom";
 import { BrandMark } from "../components/BrandMark";
-import { CODE_REQUIRED, isEmail, useSession } from "../session";
+import {
+  CODE_REJECTED,
+  CODE_REQUIRED,
+  isEmail,
+  TOO_MANY_ATTEMPTS,
+  useSession,
+  VERIFY_EMAIL_FIRST,
+} from "../session";
+
+function focusNamed(form: HTMLFormElement, name: string) {
+  const field = form.elements.namedItem(name);
+  if (field instanceof HTMLElement) {
+    field.focus();
+  }
+}
 
 export function LoginPage() {
   const { username, ready, signIn } = useSession();
-  const [error, setError] = useState<string | null>(null);
+  const [emailError, setEmailError] = useState<string | null>(null);
+  const [passwordError, setPasswordError] = useState<string | null>(null);
+  const [codeError, setCodeError] = useState<string | null>(null);
   const [needsCode, setNeedsCode] = useState(false);
   const [pending, setPending] = useState(false);
   const lock = useRef(false);
@@ -26,20 +42,33 @@ export function LoginPage() {
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const form = new FormData(event.currentTarget);
-    const email = String(form.get("email") ?? "").trim();
-    const password = String(form.get("password") ?? "");
-    const code = String(form.get("code") ?? "").trim();
-    if (!email || !password) {
-      setError("Enter your email and password.");
-      return;
+    const form = event.currentTarget;
+    const data = new FormData(form);
+    const email = String(data.get("email") ?? "").trim();
+    const password = String(data.get("password") ?? "");
+    const code = String(data.get("code") ?? "").trim();
+    setEmailError(null);
+    setPasswordError(null);
+    setCodeError(null);
+    if (!email) {
+      setEmailError("Enter your email.");
+    } else if (!isEmail(email)) {
+      setEmailError("Enter a valid email address.");
     }
-    if (!isEmail(email)) {
-      setError("Enter a valid email address.");
-      return;
+    if (!password) {
+      setPasswordError("Enter your password.");
     }
     if (needsCode && !code) {
-      setError(null);
+      setCodeError(CODE_REQUIRED);
+    }
+    if (!email || !isEmail(email) || !password || (needsCode && !code)) {
+      if (!email || !isEmail(email)) {
+        focusNamed(form, "email");
+      } else if (!password) {
+        focusNamed(form, "password");
+      } else {
+        focusNamed(form, "code");
+      }
       return;
     }
     if (lock.current) {
@@ -51,10 +80,29 @@ export function LoginPage() {
       const message = await signIn(email, password, code);
       if (message === CODE_REQUIRED) {
         setNeedsCode(true);
-        setError(null);
         return;
       }
-      setError(message);
+      if (!message) {
+        return;
+      }
+      if (message === CODE_REJECTED) {
+        setCodeError(message);
+        focusNamed(form, "code");
+        return;
+      }
+      if (message === VERIFY_EMAIL_FIRST || message === TOO_MANY_ATTEMPTS) {
+        setEmailError(message);
+        focusNamed(form, "email");
+        return;
+      }
+      if (message === "Enter your email and password.") {
+        setEmailError("Enter your email.");
+        setPasswordError("Enter your password.");
+        focusNamed(form, "email");
+        return;
+      }
+      setPasswordError(message);
+      focusNamed(form, "password");
     } finally {
       lock.current = false;
       setPending(false);
@@ -75,7 +123,14 @@ export function LoginPage() {
               autoComplete="username"
               inputMode="email"
               autoFocus
+              aria-invalid={emailError ? true : undefined}
+              aria-describedby={emailError ? "login-email-error" : undefined}
             />
+            {emailError ? (
+              <p className="form-error" id="login-email-error" role="alert">
+                {emailError}
+              </p>
+            ) : null}
           </label>
           <label className="field">
             Password
@@ -83,21 +138,35 @@ export function LoginPage() {
               name="password"
               type="password"
               autoComplete="current-password"
+              aria-invalid={passwordError ? true : undefined}
+              aria-describedby={passwordError ? "login-password-error" : undefined}
             />
+            {passwordError ? (
+              <p className="form-error" id="login-password-error" role="alert">
+                {passwordError}
+              </p>
+            ) : null}
           </label>
           {needsCode ? (
             <>
               <p className="field-help">{CODE_REQUIRED}</p>
               <label className="field">
                 Authenticator or recovery code
-                <input name="code" inputMode="numeric" autoComplete="one-time-code" autoFocus />
+                <input
+                  name="code"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  autoFocus
+                  aria-invalid={codeError ? true : undefined}
+                  aria-describedby={codeError ? "login-code-error" : undefined}
+                />
+                {codeError ? (
+                  <p className="form-error" id="login-code-error" role="alert">
+                    {codeError}
+                  </p>
+                ) : null}
               </label>
             </>
-          ) : null}
-          {error ? (
-            <p className="form-error" role="alert">
-              {error}
-            </p>
           ) : null}
           <button className="btn btn-primary btn-block" type="submit" disabled={pending}>
             Sign in

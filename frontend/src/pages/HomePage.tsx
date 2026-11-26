@@ -11,7 +11,7 @@ export function HomePage() {
           <Link to="/">
             <BrandMark />
           </Link>
-          <Link className="btn btn-primary" to="/login">
+          <Link className="btn btn-ghost" to="/login">
             Sign in
           </Link>
         </div>

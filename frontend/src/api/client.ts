@@ -21,6 +21,9 @@ export function requestError(err: unknown, fallback: string): string | null {
   if (err instanceof ApiError && err.status === 401 && err.message === SESSION_EXPIRED) {
     return null;
   }
+  if (err instanceof ApiError && err.message.startsWith(API_BASE)) {
+    return fallback;
+  }
   return err instanceof Error ? err.message : fallback;
 }
 
