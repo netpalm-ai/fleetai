@@ -215,7 +215,7 @@ class ApiTests(unittest.TestCase):
                 json={"email": "hello", "list_text": "T1 broken login", "context": "# project"},
             )
         self.assertEqual(response.status_code, 204)
-        save.assert_called_once_with("hello", "T1 broken login", "# project", None, USER.id, None)
+        save.assert_called_once_with("hello", "T1 broken login", "# project", None, USER.id, None, [])
 
     def test_post_inputs_saves_pdf(self) -> None:
         raw = b"%PDF-1.4 test"
@@ -225,7 +225,56 @@ class ApiTests(unittest.TestCase):
                 json={"list_pdf_base64": base64.b64encode(raw).decode("ascii")},
             )
         self.assertEqual(response.status_code, 204)
-        save.assert_called_once_with("", "", "", raw, USER.id, None)
+        save.assert_called_once_with("", "", "", raw, USER.id, None, [])
+
+    def test_post_inputs_saves_images(self) -> None:
+        png = b"\x89PNG\r\n\x1a\n"
+        jpeg = b"\xff\xd8\xff\xd9"
+        webp = b"RIFF\x08\x00\x00\x00WEBP"
+        with patch.object(api.config, "save_intake") as save:
+            response = self.client.post(
+                "/tickets/inputs",
+                json={
+                    "list_text": "T1 login fails",
+                    "list_images_base64": [
+                        base64.b64encode(png).decode("ascii"),
+                        base64.b64encode(jpeg).decode("ascii"),
+                        base64.b64encode(webp).decode("ascii"),
+                    ],
+                },
+            )
+        self.assertEqual(response.status_code, 204)
+        save.assert_called_once_with("", "T1 login fails", "", None, USER.id, None, [png, jpeg, webp])
+
+    def test_post_inputs_rejects_invalid_image_base64(self) -> None:
+        with patch.object(api.config, "save_intake") as save:
+            response = self.client.post(
+                "/tickets/inputs",
+                json={"list_images_base64": ["@@@@"]},
+            )
+        self.assertEqual(response.status_code, 422)
+        save.assert_not_called()
+
+    def test_post_inputs_rejects_more_than_eight_images(self) -> None:
+        png = base64.b64encode(b"\x89PNG\r\n\x1a\n").decode("ascii")
+        with patch.object(api.config, "save_intake") as save:
+            response = self.client.post(
+                "/tickets/inputs",
+                json={"list_images_base64": [png] * 9},
+            )
+        self.assertEqual(response.status_code, 422)
+        save.assert_not_called()
+
+    def test_post_inputs_accepts_eight_images(self) -> None:
+        png = b"\x89PNG\r\n\x1a\n"
+        encoded = base64.b64encode(png).decode("ascii")
+        with patch.object(api.config, "save_intake") as save:
+            response = self.client.post(
+                "/tickets/inputs",
+                json={"list_images_base64": [encoded] * 8},
+            )
+        self.assertEqual(response.status_code, 204)
+        save.assert_called_once_with("", "", "", None, USER.id, None, [png] * 8)
 
     def test_post_inputs_rejects_empty(self) -> None:
         with patch.object(api.config, "save_intake", side_effect=RuntimeError("need an email or a ticket list")):

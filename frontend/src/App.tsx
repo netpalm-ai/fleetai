@@ -16,11 +16,9 @@ function RequireAuth({ children }: { children: ReactNode }) {
   const { ready, username } = useSession();
   if (!ready) {
     return (
-      <AppShell>
-        <main className="shell shell-app">
-          <p className="muted">Loading…</p>
-        </main>
-      </AppShell>
+      <main className="shell shell-app">
+        <p className="muted">Loading…</p>
+      </main>
     );
   }
   if (!username) {
@@ -33,41 +31,43 @@ export default function App() {
   return (
     <SessionProvider>
       <BrowserRouter>
-        <Routes>
-          <Route path="/" element={<HomePage />} />
-          <Route path="/login" element={<LoginPage />} />
-          <Route path="/signup" element={<SignUpPage />} />
-          <Route path="/verify" element={<VerifyPage />} />
-          <Route path="/forgot" element={<ForgotPasswordPage />} />
-          <Route path="/reset" element={<ResetPasswordPage />} />
-          <Route path="/terms" element={<TermsPage />} />
-          <Route
-            path="/tickets"
-            element={
-              <RequireAuth>
-                <TicketsPage />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/connectors"
-            element={
-              <RequireAuth>
-                <SettingsPage />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/settings"
-            element={
-              <RequireAuth>
-                <SettingsPage />
-              </RequireAuth>
-            }
-          />
-          <Route path="/settings/connectors" element={<Navigate to="/connectors" replace />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+        <AppShell>
+          <Routes>
+            <Route path="/" element={<HomePage />} />
+            <Route path="/login" element={<LoginPage />} />
+            <Route path="/signup" element={<SignUpPage />} />
+            <Route path="/verify" element={<VerifyPage />} />
+            <Route path="/forgot" element={<ForgotPasswordPage />} />
+            <Route path="/reset" element={<ResetPasswordPage />} />
+            <Route path="/terms" element={<TermsPage />} />
+            <Route
+              path="/tickets"
+              element={
+                <RequireAuth>
+                  <TicketsPage />
+                </RequireAuth>
+              }
+            />
+            <Route
+              path="/connectors"
+              element={
+                <RequireAuth>
+                  <SettingsPage />
+                </RequireAuth>
+              }
+            />
+            <Route
+              path="/settings"
+              element={
+                <RequireAuth>
+                  <SettingsPage />
+                </RequireAuth>
+              }
+            />
+            <Route path="/settings/connectors" element={<Navigate to="/connectors" replace />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </AppShell>
       </BrowserRouter>
     </SessionProvider>
   );

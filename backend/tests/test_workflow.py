@@ -2,18 +2,23 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 import threading
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 from unittest.mock import patch
 from uuid import uuid4
 
 import pymupdf
+from cursor_sdk import SDKImage, UserMessage
 
 import config
 import db
+import intakes
+import llm
 import parser
 import solver
 import verifier
@@ -127,6 +132,8 @@ class ProductAreasTests(unittest.TestCase):
                     first = ensure_code_context(user_id)
                     second = ensure_code_context(user_id)
             self.assertEqual(run.call_count, 1)
+            self.assertEqual(len(run.call_args.args), 1)
+            self.assertIsInstance(run.call_args.args[0], str)
             self.assertEqual(saved[project_id][0], first)
             self.assertEqual(saved[project_id][1], "python, postgres")
             self.assertEqual(saved[project_id][2], user_id)
@@ -232,6 +239,8 @@ class VerifierPromptTests(unittest.TestCase):
 class ParserPromptTests(unittest.TestCase):
     def test_parser_omits_rebuild_and_redeploy_process(self) -> None:
         self.assertIn("rebuild, merge, redeploy, image-tag requests", parser.PROMPT)
+        self.assertIn("An attached image is evidence of the defect it shows.", parser.PROMPT)
+        self.assertIn("A request whose only demand is to send a screenshot is still not a ticket.", parser.PROMPT)
         for banned in ("jmd-", "SNOMED", "Xycare", "FHIR", "409137002"):
             self.assertNotIn(banned, parser.PROMPT)
 
@@ -376,9 +385,14 @@ def _encrypted_pdf() -> bytes:
     return data
 
 
+PNG = b"\x89PNG\r\n\x1a\n" + b"\x00"
+JPEG = b"\xff\xd8\xff\xd9"
+WEBP = b"RIFF\x08\x00\x00\x00WEBP"
+
+
 class SaveIntakeValidationTests(unittest.TestCase):
-    def _save(self, email: str, list_text: str, context: str, pdf: bytes | None) -> None:
-        config.save_intake(email, list_text, context, pdf, uuid4(), None)
+    def _save(self, email: str, list_text: str, context: str, pdf: bytes | None, images: list[bytes] | None = None) -> None:
+        config.save_intake(email, list_text, context, pdf, uuid4(), None, images)
 
     def test_rejects_empty(self) -> None:
         with self.assertRaises(RuntimeError):
@@ -395,6 +409,235 @@ class SaveIntakeValidationTests(unittest.TestCase):
     def test_rejects_encrypted_pdf(self) -> None:
         with self.assertRaises(RuntimeError):
             self._save("", "", "", _encrypted_pdf())
+
+    def test_rejects_invalid_image(self) -> None:
+        with self.assertRaises(RuntimeError):
+            self._save("", "", "", None, [b"hello"])
+
+    def test_rejects_image_over_five_mb(self) -> None:
+        with self.assertRaises(RuntimeError):
+            self._save("", "", "", None, [b"\x89PNG\r\n\x1a\n" + b"\x00" * (config.INTAKE_IMAGE_MAX)])
+
+    def test_rejects_more_than_eight_images(self) -> None:
+        with self.assertRaises(RuntimeError):
+            self._save("", "", "", None, [PNG] * 9)
+
+    def test_rejects_upload_over_fifty_mb(self) -> None:
+        pdf = b"%PDF" + b"\x00" * (config.INTAKE_PDF_MAX - 4)
+        with patch.object(config, "_require_pdf"):
+            with self.assertRaises(RuntimeError):
+                self._save("", "", "", pdf, [PNG])
+
+    def test_images_only_is_a_ticket_list(self) -> None:
+        with patch.object(intakes, "put") as put, patch.object(intakes, "deactivate"):
+            config.save_intake("", "", "", None, uuid4(), None, [PNG])
+        self.assertEqual([call.args[3] for call in put.call_args_list], ["png"])
+        self.assertEqual(put.call_args.args[4], PNG)
+
+    def test_accepts_eight_images(self) -> None:
+        with patch.object(intakes, "put") as put, patch.object(intakes, "deactivate"):
+            config.save_intake("", "", "", None, uuid4(), None, [PNG] * 8)
+        self.assertEqual([call.args[3] for call in put.call_args_list], ["png"] * 8)
+        self.assertTrue(put.call_args_list[0].kwargs.get("replace", True))
+        self.assertTrue(all(call.kwargs.get("replace") is False for call in put.call_args_list[1:]))
+
+    def test_stores_png_jpeg_webp_on_ticket_list_rows(self) -> None:
+        user_id = uuid4()
+        with patch.object(intakes, "put") as put, patch.object(intakes, "deactivate"):
+            config.save_intake("", "T1 login fails", "", None, user_id, None, [PNG, JPEG, WEBP])
+        formats = [call.args[3] for call in put.call_args_list]
+        payloads = [call.args[4] for call in put.call_args_list]
+        self.assertEqual(formats, ["txt", "png", "jpeg", "webp"])
+        self.assertEqual(payloads[1:], [PNG, JPEG, WEBP])
+        self.assertNotIn("replace", put.call_args_list[0].kwargs)
+        self.assertTrue(all(call.kwargs.get("replace") is False for call in put.call_args_list[1:]))
+        self.assertNotIn(PNG, payloads[0])
+
+    def test_pdf_plus_images_stores_pdf_then_images(self) -> None:
+        pdf = b"%PDF-1.4 test"
+        with patch.object(config, "_require_pdf"), patch.object(intakes, "put") as put, patch.object(intakes, "deactivate"):
+            config.save_intake("", "", "", pdf, uuid4(), None, [PNG])
+        self.assertEqual([call.args[3] for call in put.call_args_list], ["pdf", "png"])
+        self.assertEqual(put.call_args_list[0].args[4], pdf)
+        self.assertEqual(put.call_args_list[1].args[4], PNG)
+        self.assertEqual(put.call_args_list[1].kwargs.get("replace"), False)
+
+
+class IntakeTextTests(unittest.TestCase):
+    def test_pdf_contributes_extracted_text_only(self) -> None:
+        document = pymupdf.open()
+        page = document.new_page()
+        page.insert_text((72, 72), "T9 export hangs")
+        pdf = document.tobytes()
+        document.close()
+        with patch.object(intakes, "active_content", return_value=("pdf", pdf)):
+            text = parser.intake_text(uuid4(), "ticket_list")
+        self.assertEqual(text, "T9 export hangs")
+        self.assertNotIn(pdf, text.encode("utf-8"))
+
+
+class ParserImageTests(unittest.TestCase):
+    def _ticket_json(self) -> str:
+        return json.dumps(
+            [
+                {
+                    "id": "T1",
+                    "title": "login fails",
+                    "severity": "high",
+                    "services": ["api"],
+                    "context": "broken login",
+                    "expected": "login works",
+                }
+            ]
+        )
+
+    def test_images_only_extracts_with_cursor(self) -> None:
+        user_id = uuid4()
+        with (
+            patch.object(parser, "ensure_code_context", return_value="## Repositories\n| app | . | local | demo |\n"),
+            patch.object(parser, "intake_text", return_value=""),
+            patch.object(intakes, "active_images", return_value=[("png", PNG)]),
+            patch.object(intakes, "solved_tickets", return_value={}),
+            patch.object(intakes, "open_tickets", return_value=[]),
+            patch.object(intakes, "sync_tickets") as sync,
+            patch.object(parser.bedrock, "complete") as complete,
+            patch.object(parser.cursor, "run", return_value=SimpleNamespace(id="p1", result=self._ticket_json())) as run,
+        ):
+            tickets = parser.get_tickets(user_id, None)
+        complete.assert_not_called()
+        run.assert_called_once()
+        self.assertEqual(run.call_args.args[0].count("still not a ticket"), 1)
+        self.assertIn("The ticket list is the attached images.", run.call_args.args[0])
+        self.assertEqual(run.call_args.args[1], [("png", PNG)])
+        self.assertEqual([item["id"] for item in tickets], ["T1"])
+        sync.assert_called_once()
+
+    def test_email_plus_images_without_list_text_uses_cursor(self) -> None:
+        user_id = uuid4()
+
+        def texts(_user_id, intake_type: str) -> str:
+            return {"email_desc": "login is broken", "ticket_list": "", "project_context": ""}.get(intake_type, "")
+
+        with (
+            patch.object(parser, "ensure_code_context", return_value="## Repositories\n| app | . | local | demo |\n"),
+            patch.object(parser, "intake_text", side_effect=texts),
+            patch.object(intakes, "active_images", return_value=[("png", PNG)]),
+            patch.object(intakes, "solved_tickets", return_value={}),
+            patch.object(intakes, "open_tickets", return_value=[]),
+            patch.object(intakes, "sync_tickets"),
+            patch.object(parser.bedrock, "complete") as complete,
+            patch.object(parser.cursor, "run", return_value=SimpleNamespace(id="p1", result=self._ticket_json())) as run,
+        ):
+            tickets = parser.get_tickets(user_id, None)
+        complete.assert_not_called()
+        self.assertIn("login is broken", run.call_args.args[0])
+        self.assertEqual(run.call_args.args[1], [("png", PNG)])
+        self.assertEqual([item["id"] for item in tickets], ["T1"])
+
+    def test_text_plus_images_extracts_from_text(self) -> None:
+        user_id = uuid4()
+
+        def texts(_user_id, intake_type: str) -> str:
+            return {"email_desc": "", "ticket_list": "T1 login fails", "project_context": ""}.get(intake_type, "")
+
+        with (
+            patch.object(parser, "ensure_code_context", return_value="## Repositories\n| app | . | local | demo |\n"),
+            patch.object(parser, "intake_text", side_effect=texts),
+            patch.object(intakes, "active_images", return_value=[("png", PNG)]),
+            patch.object(intakes, "solved_tickets", return_value={}),
+            patch.object(intakes, "open_tickets", return_value=[]),
+            patch.object(intakes, "sync_tickets"),
+            patch.object(parser.bedrock, "complete", return_value=self._ticket_json()) as complete,
+            patch.object(parser.cursor, "run") as run,
+        ):
+            tickets = parser.get_tickets(user_id, None)
+        run.assert_not_called()
+        complete.assert_called_once()
+        self.assertIn("T1 login fails", complete.call_args.args[0])
+        self.assertNotIn(PNG.decode("latin1"), complete.call_args.args[0])
+        self.assertEqual([item["id"] for item in tickets], ["T1"])
+
+
+class CursorImageTests(unittest.TestCase):
+    def test_run_sends_user_message_with_sdk_images(self) -> None:
+        result = SimpleNamespace(status="ok", id="run-1", result="done")
+        with (
+            patch.dict("os.environ", {"CURSOR_API_KEY": "test-key"}, clear=False),
+            patch.object(llm, "product_cwd", return_value=Path("/tmp")),
+            patch("cursor_sdk.Agent.prompt", return_value=result) as prompt,
+        ):
+            llm.cursor.run("PROMPT-TEXT", [("png", PNG), ("jpeg", JPEG)])
+        message = prompt.call_args.args[0]
+        self.assertIsInstance(message, UserMessage)
+        self.assertEqual(message.text, "PROMPT-TEXT")
+        self.assertEqual(len(message.images or []), 2)
+        self.assertIsInstance((message.images or ())[0], SDKImage)
+        self.assertEqual((message.images or ())[0].mime_type, "image/png")
+        self.assertNotIn(PNG, message.text.encode("utf-8"))
+
+    def test_run_without_images_still_sends_a_string(self) -> None:
+        result = SimpleNamespace(status="ok", id="run-1", result="done")
+        with (
+            patch.dict("os.environ", {"CURSOR_API_KEY": "test-key"}, clear=False),
+            patch.object(llm, "product_cwd", return_value=Path("/tmp")),
+            patch("cursor_sdk.Agent.prompt", return_value=result) as prompt,
+        ):
+            llm.cursor.run("PROMPT-TEXT")
+        self.assertEqual(prompt.call_args.args[0], "PROMPT-TEXT")
+
+    def test_solve_stores_text_prompt_not_image_bytes(self) -> None:
+        user_id = uuid4()
+        ticket = _ticket("T1", UNRESOLVED)
+        with (
+            patch.object(intakes, "find_ticket", return_value=ticket),
+            patch.object(intakes, "ticket_project_id", return_value=None),
+            patch.object(intakes, "active_images", return_value=[("png", PNG)]),
+            patch.object(intakes, "add_run") as add_run,
+            patch.object(intakes, "set_ticket_status"),
+            patch.object(config, "ensure_code_context", return_value="## Repositories\n"),
+            patch("llm.cursor.run", return_value=SimpleNamespace(id="run-1", result="VERDICT: ready")) as run,
+        ):
+            config.run_step(user_id, "T1", UNRESOLVED, "solve", lambda _ticket, _context: "PROMPT-TEXT", {READY: VERIFYING})
+        self.assertEqual(run.call_args.args[0], "PROMPT-TEXT")
+        self.assertEqual(run.call_args.args[1], [("png", PNG)])
+        stored = add_run.call_args.args[5]
+        self.assertEqual(stored, "PROMPT-TEXT")
+        self.assertNotIn(PNG, stored.encode("utf-8"))
+
+    def test_solve_without_images_sends_text_only(self) -> None:
+        user_id = uuid4()
+        ticket = _ticket("T1", UNRESOLVED)
+        with (
+            patch.object(intakes, "find_ticket", return_value=ticket),
+            patch.object(intakes, "ticket_project_id", return_value=None),
+            patch.object(intakes, "active_images", return_value=[]),
+            patch.object(intakes, "add_run"),
+            patch.object(intakes, "set_ticket_status"),
+            patch.object(config, "ensure_code_context", return_value="## Repositories\n"),
+            patch("llm.cursor.run", return_value=SimpleNamespace(id="run-1", result="VERDICT: ready")) as run,
+        ):
+            config.run_step(user_id, "T1", UNRESOLVED, "solve", lambda _ticket, _context: "PROMPT-TEXT", {READY: VERIFYING})
+        self.assertEqual(run.call_args.args[0], "PROMPT-TEXT")
+        self.assertIsNone(run.call_args.args[1])
+
+    def test_verify_sends_images_and_stores_text_prompt(self) -> None:
+        user_id = uuid4()
+        ticket = _ticket("T1", VERIFYING)
+        with (
+            patch.object(intakes, "find_ticket", return_value=ticket),
+            patch.object(intakes, "ticket_project_id", return_value=None),
+            patch.object(intakes, "active_images", return_value=[("webp", WEBP)]),
+            patch.object(intakes, "add_run") as add_run,
+            patch.object(intakes, "set_ticket_status"),
+            patch.object(config, "ensure_code_context", return_value="## Repositories\n"),
+            patch("llm.cursor.run", return_value=SimpleNamespace(id="run-2", result="VERDICT: fixed")) as run,
+        ):
+            config.run_step(user_id, "T1", VERIFYING, "verify", lambda _ticket, _context: "PROMPT-TEXT", {FIXED: FIXED, FAILED: UNRESOLVED})
+        self.assertEqual(run.call_args.args[0], "PROMPT-TEXT")
+        self.assertEqual(run.call_args.args[1], [("webp", WEBP)])
+        stored = add_run.call_args.args[5]
+        self.assertEqual(stored, "PROMPT-TEXT")
+        self.assertNotIn(WEBP, stored.encode("utf-8"))
 
 
 class Conn:

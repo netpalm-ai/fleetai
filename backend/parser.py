@@ -16,13 +16,14 @@ from config import (
     product_areas,
     solved_prompt,
 )
-from llm import bedrock, ollama
+from llm import bedrock, cursor, ollama
 
 PROMPT = """Extract unsolved software defects from a source email and/or a bug-report PDF. Additional context is optional. A missing additional-context document is normal and is not a reason to skip tickets.
 
 Use whichever of the email and the bug report are present. Either one of those two is enough. If both are present, use the email for defect facts only. Ignore process asks in both. Do not require additional context.
 
 Business labels (Open, Partially Fixed, Not Yet Fixed, closed, deferred) and process asks (retest lists, deployment dates, build numbers, status tables, screenshots, eval readiness, rebuild, merge, redeploy, image-tag requests) are not this system's workflow and not engineering work. Do not copy them into the ticket.
+An attached image is evidence of the defect it shows. A request whose only demand is to send a screenshot is still not a ticket.
 
 This system only uses unresolved, verifying, and fixed. You do not set those.
 
@@ -79,16 +80,20 @@ def get_tickets(user_id: UUID, session_id: UUID | None = None) -> list[dict]:
     code = ensure_code_context(user_id)
     email = intake_text(user_id, "email_desc")
     report = intake_text(user_id, "ticket_list")
-    if not email and not report:
+    images = intakes.active_images(user_id)
+    if not email and not report and not images:
         raise RuntimeError("need an email or a ticket list")
     raw_additional = intake_text(user_id, "project_context")
     additional = ollama.summarize(raw_additional)
     if raw_additional and len(additional) != len(raw_additional):
         print("Summarized additional context {0} -> {1} chars".format(len(raw_additional), len(additional)))
     solved = intakes.solved_tickets(user_id)
-    body = bedrock.complete(
-        PROMPT.replace("{{email}}", email or "(none)").replace("{{report}}", report or "(none)").replace("{{additional_context}}", additional or "(none)").replace("{{product_areas}}", product_areas(code)).replace("{{solved}}", solved_prompt(solved))
-    )
+    list_body = report if report else ("The ticket list is the attached images." if images else "(none)")
+    prompt = PROMPT.replace("{{email}}", email or "(none)").replace("{{report}}", list_body).replace("{{additional_context}}", additional or "(none)").replace("{{product_areas}}", product_areas(code)).replace("{{solved}}", solved_prompt(solved))
+    if images and not report:
+        body = cursor.run(prompt, images).result
+    else:
+        body = bedrock.complete(prompt)
     if body.startswith("```"):
         body = body.split("\n", 1)[1].removesuffix("```").strip()
     tickets = apply_workflow(normalize_tickets(json.loads(body)), intakes.open_tickets(user_id), solved)

@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type DragEvent } from "react";
 import { ApiError, getJson, request, requestError } from "../api/client";
-import { AppShell } from "../components/AppShell";
 import { useSession } from "../session";
 import type { Job, Project, Ticket } from "../types";
 
@@ -58,9 +57,28 @@ function fileToBase64(file: File): Promise<string> {
       const comma = value.indexOf(",");
       resolve(comma >= 0 ? value.slice(comma + 1) : value);
     };
-    reader.onerror = () => reject(new Error("Could not read the PDF."));
+    reader.onerror = () => reject(new Error("Could not read the file."));
     reader.readAsDataURL(file);
   });
+}
+
+const INTAKE_MAX_BYTES = 50 * 1024 * 1024;
+const IMAGE_MAX_BYTES = 5 * 1024 * 1024;
+const IMAGE_MAX_COUNT = 8;
+
+function imageKind(file: File): "png" | "jpeg" | "webp" | null {
+  const name = file.name.toLowerCase();
+  const type = file.type.toLowerCase();
+  if (type === "image/png" || name.endsWith(".png")) {
+    return "png";
+  }
+  if (type === "image/jpeg" || name.endsWith(".jpeg") || name.endsWith(".jpg")) {
+    return "jpeg";
+  }
+  if (type === "image/webp" || name.endsWith(".webp")) {
+    return "webp";
+  }
+  return null;
 }
 
 export function TicketsPage() {
@@ -70,6 +88,8 @@ export function TicketsPage() {
   const [context, setContext] = useState("");
   const [pdfName, setPdfName] = useState<string | null>(null);
   const [pdfBase64, setPdfBase64] = useState<string | null>(null);
+  const [pdfBytes, setPdfBytes] = useState(0);
+  const [images, setImages] = useState<{ name: string; data: string; bytes: number }[]>([]);
   const [listMode, setListMode] = useState<"paste" | "pdf">("paste");
   const [projects, setProjects] = useState<Project[] | null>(null);
   const [projectId, setProjectId] = useState<string | null>(null);
@@ -201,9 +221,48 @@ export function TicketsPage() {
       setError("Upload a .pdf file.");
       return;
     }
+    const imageBytes = images.reduce((sum, image) => sum + image.bytes, 0);
+    if (file.size + imageBytes > INTAKE_MAX_BYTES) {
+      setError("The upload must stay within 50 MB.");
+      return;
+    }
     setError(null);
     setPdfName(file.name);
+    setPdfBytes(file.size);
     setPdfBase64(await fileToBase64(file));
+  }
+
+  async function onImages(event: ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(event.target.files ?? []);
+    event.target.value = "";
+    if (files.length === 0) {
+      return;
+    }
+    if (files.length > IMAGE_MAX_COUNT) {
+      setError("Attach at most 8 images.");
+      return;
+    }
+    const pdfSize = listMode === "pdf" ? pdfBytes : 0;
+    let total = pdfSize;
+    const next: { name: string; data: string; bytes: number }[] = [];
+    for (const file of files) {
+      if (!imageKind(file)) {
+        setError("Upload png, jpeg, or webp images.");
+        return;
+      }
+      if (file.size > IMAGE_MAX_BYTES) {
+        setError("Each image must be at most 5 MB.");
+        return;
+      }
+      total += file.size;
+      if (total > INTAKE_MAX_BYTES) {
+        setError("The upload must stay within 50 MB.");
+        return;
+      }
+      next.push({ name: file.name, data: await fileToBase64(file), bytes: file.size });
+    }
+    setError(null);
+    setImages(next);
   }
 
   function onPdf(event: ChangeEvent<HTMLInputElement>) {
@@ -235,7 +294,7 @@ export function TicketsPage() {
       await request<Ticket>("/tickets/" + ticketId + "/complete", { method: "POST" });
       load();
     } catch (err: unknown) {
-      const message = requestError(err, "complete failed");
+      const message = requestError(err, "Could not mark the ticket completed.");
       if (message) {
         setError(message);
       }
@@ -285,11 +344,12 @@ export function TicketsPage() {
     }
     const list = listMode === "pdf" ? "" : listText;
     const encoded = listMode === "pdf" ? pdfBase64 : null;
+    const imageData = images.map((image) => image.data);
     setError(null);
     setBusy(true);
     setRunIds(ids);
     try {
-      if (saveInputs && (email.trim() || list.trim() || encoded)) {
+      if (saveInputs && (email.trim() || list.trim() || encoded || imageData.length > 0)) {
         await request<void>("/tickets/inputs", {
           method: "POST",
           body: JSON.stringify({
@@ -297,6 +357,7 @@ export function TicketsPage() {
             list_text: list,
             context,
             list_pdf_base64: encoded,
+            list_images_base64: imageData,
           }),
         });
       }
@@ -334,7 +395,6 @@ export function TicketsPage() {
   }
 
   return (
-    <AppShell>
       <main className="shell shell-app">
         <div className="page-head">
           <div>
@@ -377,7 +437,7 @@ export function TicketsPage() {
               />
             </label>
             <div className="field">
-              Ticket list
+              <label htmlFor="ticket-list">Ticket list</label>
               <div className="seg" role="tablist" aria-label="Ticket list source">
                 <button
                   type="button"
@@ -409,6 +469,7 @@ export function TicketsPage() {
               </div>
               {listMode === "paste" ? (
                 <textarea
+                  id="ticket-list"
                   name="list_text"
                   rows={10}
                   placeholder="Paste the ticket list as raw text."
@@ -419,6 +480,18 @@ export function TicketsPage() {
                 <p className="pdf-name">{pdfName}</p>
               ) : null}
             </div>
+            <label className="field">
+              Images
+              <input
+                type="file"
+                accept="image/png,image/jpeg,image/webp,.png,.jpeg,.jpg,.webp"
+                multiple
+                onChange={(event) => void onImages(event)}
+              />
+              {images.length > 0 ? (
+                <p className="pdf-name">{images.map((image) => image.name).join(", ")}</p>
+              ) : null}
+            </label>
             <label className="field">
               Project context
               <textarea
@@ -484,12 +557,13 @@ export function TicketsPage() {
                               disabled={running}
                               onChange={(event) => toggleSelected(ticket.id, event.target.checked)}
                             />
+                            <span>Resolve</span>
                           </label>
                         ) : null}
                         {ticket.status === "verifying" && !running ? (
                           <button
                             type="button"
-                            className="btn btn-primary"
+                            className="btn btn-ghost"
                             onClick={() => void onComplete(ticket.id)}
                           >
                             Mark completed
@@ -516,7 +590,7 @@ export function TicketsPage() {
             {tickets != null ? (
               <button
                 type="button"
-                className="btn btn-primary btn-block resolve-btn"
+                className="btn btn-ghost btn-block resolve-btn"
                 disabled={running}
                 onClick={() => void startResolve(selected, "Select a ticket.", false)}
               >
@@ -526,6 +600,5 @@ export function TicketsPage() {
           </section>
         </div>
       </main>
-    </AppShell>
   );
 }
