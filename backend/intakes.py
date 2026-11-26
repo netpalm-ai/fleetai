@@ -177,7 +177,12 @@ def list_open_tickets(user_id: UUID) -> list[dict]:
     return [dict(row) for row in rows]
 
 
-def list_visible_tickets(user_id: UUID) -> list[dict]:
+def list_visible_tickets(user_id: UUID, project_id: UUID | None = None) -> list[dict]:
+    where = "t.user_id = %s"
+    params: list[object] = [user_id]
+    if project_id is not None:
+        where += " AND t.project_id = %s"
+        params.append(project_id)
     with db.get_pool().connection() as conn:
         rows = conn.execute(
             f"""
@@ -186,7 +191,7 @@ def list_visible_tickets(user_id: UUID) -> list[dict]:
             LEFT JOIN intakes i ON i.id = t.intake_id
             LEFT JOIN users u ON u.id = t.user_id
             {_USER_TIER_JOINS}
-            WHERE t.user_id = %s
+            WHERE {where}
               AND (
                 t.status IN ('unresolved', 'verifying')
                 OR (
@@ -204,7 +209,7 @@ def list_visible_tickets(user_id: UUID) -> list[dict]:
               )
             ORDER BY t.public_id
             """,
-            (user_id,),
+            params,
         ).fetchall()
     return [dict(row) for row in rows]
 

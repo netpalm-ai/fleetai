@@ -3,11 +3,10 @@
 Parse the evaluator email and/or a bug-report PDF into tickets. An optional
 evidence PDF is summarized locally with Ollama when it is long, then Claude
 Sonnet on Bedrock writes the tickets. Each unresolved ticket can go to a
-local Cursor agent. The product repos and how to work in them are in
-`backend/codebase/code-context.md`. Set `FLEETAI_PRODUCT_ROOT` to the folder that
-contains those checkouts. To point the solver at this repo instead, set
-`FLEETAI_PRODUCT_ROOT` to this checkout and `FLEETAI_CODE_CONTEXT` to
-`backend/codebase/code-context.fleetai.md`. `backend/` is the API. `frontend/` is the web app.
+local Cursor agent. Each user's project has its own map in `project_contexts`,
+joined by `project_id`. The first run for a project inspects that checkout
+and stores the org, product name, codebase context, and tech stack. JarvisMD is org HBA. FleetAI is org Netpalm.AI.
+`backend/` is the API. `frontend/` is the web app.
 
 ```bash
 conda activate dev

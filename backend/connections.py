@@ -131,7 +131,7 @@ class GithubConnection:
             )
             if previous is not None and str(previous["github_login"]) != login:
                 conn.execute(
-                    "UPDATE github_connections SET project_name = NULL WHERE user_id = %s",
+                    "UPDATE github_connections SET project_name = NULL, project_id = NULL WHERE user_id = %s",
                     (user_id,),
                 )
                 conn.execute("DELETE FROM github_repos WHERE user_id = %s", (user_id,))
@@ -221,15 +221,16 @@ class GithubConnection:
         if unknown:
             raise RuntimeError("repository is not granted: {0}".format(unknown[0]))
         with db.get_pool().connection() as conn:
+            project_id = upsert_project(conn, user_id, project_name)
             conn.execute(
-                "UPDATE github_connections SET project_name = %s WHERE user_id = %s",
-                (project_name, user_id),
+                "UPDATE github_connections SET project_name = %s, project_id = %s WHERE user_id = %s",
+                (project_name, project_id, user_id),
             )
             conn.execute("DELETE FROM github_repos WHERE user_id = %s", (user_id,))
             for name in clean:
                 conn.execute(
-                    "INSERT INTO github_repos (user_id, full_name) VALUES (%s, %s)",
-                    (user_id, name),
+                    "INSERT INTO github_repos (user_id, project_id, full_name) VALUES (%s, %s, %s)",
+                    (user_id, project_id, name),
                 )
             conn.commit()
 
@@ -309,6 +310,100 @@ class GithubConnection:
             yield
         finally:
             config.restore_checkout(token)
+
+
+def upsert_project(conn, user_id: UUID, name: str) -> UUID:
+    row = conn.execute(
+        """
+        INSERT INTO projects (user_id, name) VALUES (%s, %s)
+        ON CONFLICT (user_id, name) DO UPDATE SET name = EXCLUDED.name
+        RETURNING id
+        """,
+        (user_id, name),
+    ).fetchone()
+    return row["id"]
+
+
+def list_projects(user_id: UUID) -> list[dict]:
+    with db.get_pool().connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT p.id, p.name, c.org, c.product_name
+            FROM projects p
+            LEFT JOIN project_contexts c ON c.project_id = p.id
+            WHERE p.user_id = %s
+            ORDER BY p.name
+            """,
+            (user_id,),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def active_project_id(user_id: UUID) -> UUID | None:
+    if db.pool is None:
+        return None
+    with db.get_pool().connection() as conn:
+        row = conn.execute(
+            "SELECT project_id FROM github_connections WHERE user_id = %s",
+            (user_id,),
+        ).fetchone()
+    if row is None or row["project_id"] is None:
+        return None
+    return row["project_id"]
+
+
+def project_name(project_id: UUID) -> str | None:
+    with db.get_pool().connection() as conn:
+        row = conn.execute("SELECT name FROM projects WHERE id = %s", (project_id,)).fetchone()
+    if row is None:
+        return None
+    return str(row["name"])
+
+
+def project_context(project_id: UUID) -> str | None:
+    with db.get_pool().connection() as conn:
+        row = conn.execute(
+            "SELECT codebase_context FROM project_contexts WHERE project_id = %s",
+            (project_id,),
+        ).fetchone()
+    if row is None:
+        return None
+    return str(row["codebase_context"])
+
+
+def catalog_context(product_name: str) -> tuple[str, str, str] | None:
+    with db.get_pool().connection() as conn:
+        row = conn.execute(
+            """
+            SELECT org, codebase_context, tech_stack
+            FROM project_contexts
+            WHERE project_id IS NULL AND product_name = %s
+            """,
+            (product_name,),
+        ).fetchone()
+    if row is None:
+        return None
+    return str(row["org"]), str(row["codebase_context"]), str(row["tech_stack"])
+
+
+def save_project_context(project_id: UUID, user_id: UUID, codebase_context: str, tech_stack: str, org: str, product_name: str) -> None:
+    with db.get_pool().connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO project_contexts (project_id, user_id, org, product_name, codebase_context, tech_stack)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            ON CONFLICT (project_id) WHERE project_id IS NOT NULL
+            DO UPDATE
+            SET user_id = EXCLUDED.user_id,
+                org = EXCLUDED.org,
+                product_name = EXCLUDED.product_name,
+                codebase_context = EXCLUDED.codebase_context,
+                tech_stack = EXCLUDED.tech_stack,
+                updated_at = now()
+            """,
+            (project_id, user_id, org, product_name, codebase_context, tech_stack),
+        )
+        conn.commit()
 
 
 github = GithubConnection()

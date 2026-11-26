@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 import threading
 import unittest
 from pathlib import Path
@@ -27,6 +28,7 @@ from config import (
     normalize_ticket,
     agent_context,
     engineering_standard,
+    ensure_code_context,
     product_areas,
     tech_ticket,
 )
@@ -74,20 +76,64 @@ class RequireEnvTests(unittest.TestCase):
 
 class ProductAreasTests(unittest.TestCase):
     def test_parser_map_is_repositories_only(self) -> None:
-        text = product_areas()
+        text = product_areas(
+            "# Product\n\n## Repositories\n\n| app | . | local | demo |\n\n## Work rules\n\nstaging-uk-jmd-xycare-cicd\n"
+        )
         self.assertIn("## Repositories", text)
         self.assertNotIn("## Work rules", text)
         self.assertNotIn("staging-uk-jmd-xycare-cicd", text)
+        self.assertNotIn("jmd-frontend", text)
 
-    def test_self_adapter_is_opt_in(self) -> None:
+    def test_example_map_slices_to_repositories(self) -> None:
         path = Path(__file__).resolve().parents[1] / "codebase" / "code-context.fleetai.md"
-        with patch.dict("os.environ", {"FLEETAI_CODE_CONTEXT": str(path)}):
-            text = product_areas()
-            self.assertIn("## Repositories", text)
-            self.assertIn("frontend", text)
-            self.assertNotIn("jmd-frontend", text)
-            self.assertNotIn("## Work rules", text)
-        self.assertIn("jmd-frontend", product_areas())
+        text = product_areas(path.read_text(encoding="utf-8"))
+        self.assertIn("## Repositories", text)
+        self.assertIn("frontend", text)
+        self.assertNotIn("jmd-frontend", text)
+        self.assertNotIn("## Work rules", text)
+
+    def test_missing_map_is_stored_on_the_project(self) -> None:
+        user_id = uuid4()
+        project_id = uuid4()
+        saved: dict = {}
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            subprocess.check_call(["git", "init", "-q", str(root)])
+
+            def write_map(prompt: str) -> None:
+                self.assertIn("Tech stack", prompt)
+                self.assertNotIn("jmd-", prompt)
+                self.assertNotIn("Jarvis", prompt)
+                dest = root / ".fleetai" / "code-context.md"
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                dest.write_text(
+                    "# Demo\n\n## Product\n\nFleetAI\n\n## Org\n\nnetpalm\n\n## Repositories\n\n| app | . | local | demo |\n\n## Tech stack\n\npython, postgres\n",
+                    encoding="utf-8",
+                )
+
+            def remember(pid, owner, context: str, tech: str, org: str, product_name: str) -> None:
+                saved[pid] = (context, tech, owner, org, product_name)
+
+            with patch.dict("os.environ", {"FLEETAI_PRODUCT_ROOT": str(root)}):
+                with (
+                    patch("connections.active_project_id", return_value=project_id),
+                    patch("connections.project_name", return_value="demo"),
+                    patch("connections.catalog_context", return_value=None),
+                    patch("connections.project_context", side_effect=lambda pid: None if pid not in saved else saved[pid][0]),
+                    patch("connections.save_project_context", side_effect=remember),
+                    patch("llm.cursor.run", side_effect=write_map) as run,
+                ):
+                    first = ensure_code_context(user_id)
+                    second = ensure_code_context(user_id)
+            self.assertEqual(run.call_count, 1)
+            self.assertEqual(saved[project_id][0], first)
+            self.assertEqual(saved[project_id][1], "python, postgres")
+            self.assertEqual(saved[project_id][2], user_id)
+            self.assertEqual(saved[project_id][3], "netpalm")
+            self.assertEqual(saved[project_id][4], "FleetAI")
+            self.assertEqual(second, first)
+            self.assertFalse((root / ".fleetai" / "code-context.md").exists())
+            self.assertIn(".fleetai/", (root / ".git" / "info" / "exclude").read_text(encoding="utf-8"))
 
 
 class TechTicketTests(unittest.TestCase):
@@ -135,7 +181,7 @@ class EngineeringIngestTests(unittest.TestCase):
         self.assertIn("Do not switch branch, stash, commit, push, rebase, discard, or deploy", skill)
         for banned in ("jmd-", "SNOMED", "Xycare", "FHIR", "409137002", "staging-uk-jmd"):
             self.assertNotIn(banned, skill)
-        packed = agent_context()
+        packed = agent_context("# Product\n\n## Repositories\n\n| app | . | local | demo |\n")
         self.assertLess(packed.find("ENGINEERING STANDARD"), packed.find("CODE CONTEXT"))
         self.assertLess(packed.find("Edit existing code"), packed.find("## Repositories"))
         sent = solver.ticket_prompt(_ticket("T1", UNRESOLVED), packed)

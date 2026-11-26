@@ -96,6 +96,60 @@ class GithubConnectTests(unittest.TestCase):
         self.assertEqual(saved.json()["repos"], [{"full_name": "acme/api", "selected": True}])
         self.assertEqual(rejected.status_code, 400)
         self.assertEqual(connections.github.selected_repos(self.user_id), ["acme/api"])
+        with db.get_pool().connection() as conn:
+            repo = conn.execute(
+                """
+                SELECT r.full_name
+                FROM github_repos r
+                JOIN projects p ON p.id = r.project_id AND p.user_id = r.user_id
+                WHERE r.user_id = %s
+                """,
+                (self.user_id,),
+            ).fetchone()
+        self.assertEqual(repo["full_name"], "acme/api")
+        project_id = connections.active_project_id(self.user_id)
+        self.assertIsNotNone(project_id)
+        connections.save_project_context(
+            project_id,
+            self.user_id,
+            "# Acme\n\n## Repositories\n\n| api | api | acme/api | api |\n",
+            "go",
+            "acme",
+            "JarvisMD",
+        )
+        self.assertIn("## Repositories", connections.project_context(project_id))
+        with db.get_pool().connection() as conn:
+            row = conn.execute(
+                """
+                SELECT c.user_id, c.org, c.product_name, c.tech_stack, p.name
+                FROM project_contexts c
+                JOIN projects p ON p.id = c.project_id AND p.user_id = c.user_id
+                WHERE c.project_id = %s
+                """,
+                (project_id,),
+            ).fetchone()
+        self.assertEqual(row["user_id"], self.user_id)
+        self.assertEqual(row["name"], "acme")
+        self.assertEqual(row["org"], "acme")
+        self.assertEqual(row["product_name"], "JarvisMD")
+        self.assertEqual(row["tech_stack"], "go")
+
+    def test_catalog_holds_jarvismd_and_fleetai(self) -> None:
+        with db.get_pool().connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT org, product_name, codebase_context
+                FROM project_contexts
+                WHERE project_id IS NULL
+                ORDER BY product_name
+                """
+            ).fetchall()
+        self.assertEqual(
+            [(row["org"], row["product_name"]) for row in rows],
+            [("Netpalm.AI", "FleetAI"), ("HBA", "JarvisMD")],
+        )
+        self.assertIn("## Repositories", rows[0]["codebase_context"])
+        self.assertIn("jmd-frontend", rows[1]["codebase_context"])
 
     def test_a_different_github_account_clears_the_saved_project(self) -> None:
         connections.github.save_connection(self.user_id, "octocat", "gho_secret")
@@ -105,10 +159,11 @@ class GithubConnectTests(unittest.TestCase):
         self.assertEqual(connections.github.selected_repos(self.user_id), [])
         with db.get_pool().connection() as conn:
             project = conn.execute(
-                "SELECT project_name FROM github_connections WHERE user_id = %s",
+                "SELECT project_name, project_id FROM github_connections WHERE user_id = %s",
                 (self.user_id,),
-            ).fetchone()["project_name"]
-        self.assertIsNone(project)
+            ).fetchone()
+        self.assertIsNone(project["project_name"])
+        self.assertIsNone(project["project_id"])
 
     def test_status_keeps_a_saved_repo_missing_from_github(self) -> None:
         connections.github.save_connection(self.user_id, "octocat", "gho_secret")

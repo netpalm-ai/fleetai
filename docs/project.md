@@ -1,11 +1,15 @@
 # fleetai
 
 Commercial ticket runner. FleetAI is the product. The checkout at
-`FLEETAI_PRODUCT_ROOT` is a customer. `codebase/code-context.md` is that
-customer's adapter: repositories, runtime flow, where domain rules live,
-tests, branches, and data-handling limits. Replace the adapter to point the
-same solver at another platform. `codebase/engineering.md` is the engineering
-standard injected into every solve and verify prompt, ahead of the adapter.
+`FLEETAI_PRODUCT_ROOT` is whichever codebase the operator points at. The
+runner does not load a built-in customer map. Each user has projects.
+`project_contexts` stores `user_id`, `org`, `product_name`, `codebase_context`,
+and `tech_stack`. JarvisMD is stored with org HBA. FleetAI is stored with org
+Netpalm.AI. A user's copy sets `user_id` and `project_id`. On the first parse, solve, or verify
+for a project with no row, a Cursor agent inspects that project's checkout
+and the runner stores the map. Later runs load the row.
+`codebase/engineering.md` is the engineering standard injected into every
+solve and verify prompt, ahead of that map.
 The prompts themselves stay a short per-turn loop.
 When the adapter does not name a repo, owner, test, or layer, the solver
 inspects the product root before it edits. It does not deploy.
@@ -62,7 +66,7 @@ cd /Users/minh/repos/netpalm.ai/fleetai/backend
 uvicorn api:app
 ```
 
-The workflow is API only. `GET /health` returns the runner version when `engineering.md` and `code-context.md` are present. `POST /tickets/inputs` stores the email, ticket list (text or PDF), and optional markdown context. `POST /tickets/{id}/solve`, `POST /tickets/{id}/verify`, and `POST /execute` return `202` and a job id. Poll `GET /jobs/{id}` until `done` or `error`. Jobs are held in memory per user and are lost on restart. `GET /tickets/{id}` reads the user's ticket. `GET /tickets/{id}/runs/{run_id}` reads the solve or verify log. `POST /tickets/{id}/complete` stays synchronous and returns the completed ticket. `GET /settings` and `PUT /settings` read and change ticket retention. Parse, solve, verify, complete, execute, and intake take one exclusive lock per user. A second writer for the same user gets `409 workflow busy`. Different users do not block each other.
+The workflow is API only. `GET /health` returns the runner version when `engineering.md` is present. A project does not need a code map before the API is up; the first parse, solve, or verify stores one on `project_contexts`. `POST /tickets/inputs` stores the email, ticket list (text or PDF), and optional markdown context. `POST /tickets/{id}/solve`, `POST /tickets/{id}/verify`, and `POST /execute` return `202` and a job id. Poll `GET /jobs/{id}` until `done` or `error`. Jobs are held in memory per user and are lost on restart. `GET /tickets/{id}` reads the user's ticket. `GET /tickets/{id}/runs/{run_id}` reads the solve or verify log. `POST /tickets/{id}/complete` stays synchronous and returns the completed ticket. `GET /settings` and `PUT /settings` read and change ticket retention. Parse, solve, verify, complete, execute, and intake take one exclusive lock per user. A second writer for the same user gets `409 workflow busy`. Different users do not block each other.
 
 Parse does not solve or verify. It needs AWS credentials
 and a region. It needs Ollama only when the additional context is longer
@@ -105,7 +109,7 @@ ticket references.
 The parser keeps the software defect only. Solver and verifier see `id`,
 `title`, `severity`, `services`, `context`, and `expected`. Business labels
 and process asks are not engineering work. `repos` is leftover metadata.
-Routing is `code-context.md` plus `services`.
+Routing is the checkout map plus `services`.
 
 ## Files
 
@@ -121,7 +125,7 @@ Routing is `code-context.md` plus `services`.
 - `auth/` — Argon2id passwords, opaque session cookie `fleetai_session`
 - `pyproject.toml` — package name, version, pinned dependencies
 - `backend/` — API microservice. `frontend/` — web app microservice. Compose runs both.
-- `codebase/code-context.md` — product map. Not the additional-context PDF
+- `codebase/code-context.md` — an example map. The runner does not load it. A project's map is `project_contexts`, joined on `projects.id`
 - `tests/test_workflow.py` — workflow unit tests. They do not call the models
 - `tests/test_intakes.py` — Postgres storage and retention tests
 
@@ -150,8 +154,7 @@ Solve and verify:
 - `CURSOR_API_KEY` — GitHub Actions secret. Not stored in `.env`. GitHub will
   not return that value to a local script. Actions inject
   `${{ secrets.CURSOR_API_KEY }}`.
-- `FLEETAI_PRODUCT_ROOT`, the directory that contains the product checkouts
-- `FLEETAI_CODE_CONTEXT`, optional path to a different adapter. Unset uses `backend/codebase/code-context.md` (the customer). To run the solver on this repo, set `FLEETAI_PRODUCT_ROOT` to the fleetai checkout and `FLEETAI_CODE_CONTEXT` to `backend/codebase/code-context.fleetai.md`.
+- `FLEETAI_PRODUCT_ROOT`, the checkout used when the user has not connected a GitHub project. A named project is checked out under `FLEETAI_PROJECTS`. Its map is the `project_contexts` row for that `project_id`.
 - `FLEETAI_CURSOR_MODEL`, `FLEETAI_CURSOR_REASONING`, `FLEETAI_CURSOR_FAST`
 
 `.env` is empty. Non-secret config is GitHub Actions variables on `ngtminh/fleetai`. Secrets are Actions secrets only:

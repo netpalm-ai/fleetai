@@ -1,7 +1,5 @@
 # FleetAI
 
-This adapter is the FleetAI product itself. `code-context.md` stays the customer map. Do not edit that file, compose, or CI to point a customer deploy at this checkout.
-
 ## Product root
 
 `FLEETAI_PRODUCT_ROOT` is this git checkout, one repository (`netpalm-ai/fleetai`). `frontend/` and `backend/` are directories in that repo, not separate clones. Run git at the checkout root. Do not commit, push, or deploy.

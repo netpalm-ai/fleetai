@@ -10,6 +10,7 @@ import pymupdf
 import intakes
 from config import (
     apply_workflow,
+    ensure_code_context,
     locked,
     normalize_tickets,
     product_areas,
@@ -75,6 +76,7 @@ def intake_text(user_id: UUID, intake_type: str) -> str:
 
 @locked
 def get_tickets(user_id: UUID, session_id: UUID | None = None) -> list[dict]:
+    code = ensure_code_context(user_id)
     email = intake_text(user_id, "email_desc")
     report = intake_text(user_id, "ticket_list")
     if not email and not report:
@@ -85,7 +87,7 @@ def get_tickets(user_id: UUID, session_id: UUID | None = None) -> list[dict]:
         print("Summarized additional context {0} -> {1} chars".format(len(raw_additional), len(additional)))
     solved = intakes.solved_tickets(user_id)
     body = bedrock.complete(
-        PROMPT.replace("{{email}}", email or "(none)").replace("{{report}}", report or "(none)").replace("{{additional_context}}", additional or "(none)").replace("{{product_areas}}", product_areas()).replace("{{solved}}", solved_prompt(solved))
+        PROMPT.replace("{{email}}", email or "(none)").replace("{{report}}", report or "(none)").replace("{{additional_context}}", additional or "(none)").replace("{{product_areas}}", product_areas(code)).replace("{{solved}}", solved_prompt(solved))
     )
     if body.startswith("```"):
         body = body.split("\n", 1)[1].removesuffix("```").strip()

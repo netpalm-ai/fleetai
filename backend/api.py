@@ -6,6 +6,7 @@ import base64
 import secrets
 from contextlib import asynccontextmanager
 from typing import Literal
+from uuid import UUID
 
 import config
 import connections
@@ -112,7 +113,6 @@ def _start_job(kind: str, call, background: BackgroundTasks, user: User, ticket_
 def health() -> dict:
     try:
         config.engineering_standard()
-        config.code_context()
     except RuntimeError as exc:
         raise HTTPException(503, str(exc)) from exc
     return {"status": "ok", "version": config.VERSION}
@@ -214,9 +214,14 @@ def github_callback(request: Request, code: str = "", state: str = "", error: st
     return finish(RedirectResponse(_page("/connectors", "?github=connected"), status_code=302))
 
 
+@app.get("/projects")
+def get_projects(user: User = Depends(require_tickets)) -> list[dict]:
+    return connections.list_projects(user.id)
+
+
 @app.get("/tickets")
-def get_tickets(user: User = Depends(require_tickets)) -> list[dict]:
-    return intakes.list_visible_tickets(user.id)
+def get_tickets(project_id: UUID | None = None, user: User = Depends(require_tickets)) -> list[dict]:
+    return intakes.list_visible_tickets(user.id, project_id)
 
 
 @app.post("/tickets/inputs", status_code=204, response_model=None)

@@ -48,8 +48,32 @@ def require_env_int(name: str) -> int:
 
 INTAKE_PDF_MAX = 50 * 1024 * 1024
 INTAKE_TEXT_MAX = 512 * 1024
-CONTEXT_PATH = ROOT / "codebase" / "code-context.md"
 ENGINEERING_PATH = ROOT / "codebase" / "engineering.md"
+MAP_PROMPT = """
+This project has no code context. Inspect only this checkout and write `.fleetai/code-context.md`.
+Do not edit any other file. Do not commit, push, or deploy. Do not copy rules from a product that is not in this tree.
+
+The file is the map later tickets use. It must contain these sections:
+
+## Repositories
+A table with columns: Ticket service names | Local checkout | Remote | Owns.
+One row per repository or top-level service directory. Paths are relative to this checkout. If this checkout is one git repository, one row for `.` is enough.
+
+## Product
+The product name found in this checkout. One line.
+
+## Org
+The organization that owns this checkout. One line.
+
+## Tech stack
+One line: languages, frameworks, and datastores found in this checkout.
+
+## Tests
+The command each row's own CI runs. Do not invent a test runner. If a row has no test command, say so.
+
+## Work rules
+Only rules found in this checkout: required branches, data limits, and what must not be edited. If none were found, write "None found."
+""".strip()
 VERSION = "0.1.0"
 _user_locks: dict[UUID, threading.Lock] = {}
 _user_locks_guard = threading.Lock()
@@ -230,27 +254,76 @@ def _read_required(path: Path, label: str) -> str:
     return text
 
 
-def code_context_path() -> Path:
-    override = (os.getenv("FLEETAI_CODE_CONTEXT") or "").strip()
-    if not override:
-        return CONTEXT_PATH
-    return Path(override)
+def _section(text: str, heading: str) -> str:
+    marker = "## " + heading
+    start = text.find(marker)
+    if start < 0:
+        return ""
+    rest = text[start + len(marker):].lstrip("\n")
+    nxt = rest.find("\n## ")
+    body = rest if nxt < 0 else rest[:nxt]
+    return body.strip()
 
 
-def code_context() -> str:
-    return _read_required(code_context_path(), "code context")
+def _exclude_runner_map(root: Path) -> None:
+    info = root / ".git" / "info"
+    if not info.is_dir() and not (root / ".git").is_dir():
+        return
+    info.mkdir(parents=True, exist_ok=True)
+    exclude = info / "exclude"
+    existing = exclude.read_text(encoding="utf-8") if exclude.is_file() else ""
+    if ".fleetai/" in existing.splitlines():
+        return
+    if existing and not existing.endswith("\n"):
+        existing += "\n"
+    exclude.write_text(existing + ".fleetai/\n", encoding="utf-8")
+
+
+def ensure_code_context(user_id: UUID) -> str:
+    import connections
+
+    project_id = connections.active_project_id(user_id)
+    if project_id is None:
+        raise RuntimeError("name the project in Settings")
+    stored = connections.project_context(project_id)
+    if stored:
+        return stored
+    name = connections.project_name(project_id) or ""
+    known = connections.catalog_context(name)
+    if known:
+        org, text, tech_stack = known
+        connections.save_project_context(project_id, user_id, text, tech_stack, org, name)
+        return text
+    root = product_cwd()
+    path = root / ".fleetai" / "code-context.md"
+    _exclude_runner_map(root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    from llm import cursor
+    cursor.run(MAP_PROMPT)
+    written = path.read_text(encoding="utf-8") if path.is_file() else ""
+    product_name = _section(written, "Product").splitlines()[0].strip() if _section(written, "Product") else ""
+    org = _section(written, "Org").splitlines()[0].strip() if _section(written, "Org") else ""
+    tech_stack = _section(written, "Tech stack")
+    if "## Repositories" not in written or not product_name or not org or not tech_stack:
+        raise RuntimeError("code context was not written: {0}".format(path))
+    connections.save_project_context(project_id, user_id, written.strip(), tech_stack, org, product_name)
+    path.unlink(missing_ok=True)
+    try:
+        path.parent.rmdir()
+    except OSError:
+        pass
+    return written.strip()
 
 
 def engineering_standard() -> str:
     return _read_required(ENGINEERING_PATH, "engineering standard")
 
 
-def agent_context() -> str:
-    return "ENGINEERING STANDARD\n{0}\n\nCODE CONTEXT\n{1}".format(engineering_standard(), code_context())
+def agent_context(code: str) -> str:
+    return "ENGINEERING STANDARD\n{0}\n\nCODE CONTEXT\n{1}".format(engineering_standard(), code)
 
 
-def product_areas() -> str:
-    text = code_context()
+def product_areas(text: str) -> str:
     start = text.find("## Repositories")
     if start < 0:
         return text
@@ -513,7 +586,8 @@ def run_step(user_id: UUID, ticket_id: str, want: str, kind: str, make_prompt, n
     if ticket["status"] != want:
         print("{0}\tskipped\t{1}".format(ticket_id, ticket["status"]))
         return
-    prompt = make_prompt(ticket, agent_context())
+    code = ensure_code_context(user_id)
+    prompt = make_prompt(ticket, agent_context(code))
     from llm import cursor
     result = cursor.run(prompt)
     if result.result:

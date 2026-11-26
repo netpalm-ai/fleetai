@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, type ChangeEvent, type DragEv
 import { ApiError, getJson, request, requestError } from "../api/client";
 import { AppShell } from "../components/AppShell";
 import { useSession } from "../session";
-import type { Job, Ticket } from "../types";
+import type { Job, Project, Ticket } from "../types";
 
 function handlingId(tickets: Ticket[]): string | null {
   const unresolved = tickets.find((ticket) => ticket.status === "unresolved");
@@ -74,6 +74,8 @@ export function TicketsPage() {
   const [pdfName, setPdfName] = useState<string | null>(null);
   const [pdfBase64, setPdfBase64] = useState<string | null>(null);
   const [listMode, setListMode] = useState<"paste" | "pdf">("paste");
+  const [projects, setProjects] = useState<Project[] | null>(null);
+  const [projectId, setProjectId] = useState<string | null>(null);
   const [tickets, setTickets] = useState<Ticket[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [job, setJob] = useState<Job | null>(null);
@@ -84,7 +86,11 @@ export function TicketsPage() {
   const poll = useRef<number | null>(null);
 
   const load = useCallback(() => {
-    getJson<Ticket[]>("/tickets")
+    if (projectId === null) {
+      return;
+    }
+    const path = projectId ? `/tickets?project_id=${encodeURIComponent(projectId)}` : "/tickets";
+    getJson<Ticket[]>(path)
       .then(setTickets)
       .catch((err: unknown) => {
         if (err instanceof ApiError && err.status === 403) {
@@ -100,7 +106,29 @@ export function TicketsPage() {
           setError(message);
         }
       });
-  }, []);
+  }, [projectId]);
+
+  useEffect(() => {
+    if (!username) {
+      return;
+    }
+    getJson<Project[]>("/projects")
+      .then((rows) => {
+        setProjects(rows);
+        setProjectId((current) => {
+          if (current && rows.some((row) => row.id === current)) {
+            return current;
+          }
+          return rows[0]?.id ?? "";
+        });
+      })
+      .catch((err: unknown) => {
+        const message = requestError(err, "request failed");
+        if (message) {
+          setError(message);
+        }
+      });
+  }, [username]);
 
   useEffect(() => {
     if (username) {
@@ -262,6 +290,16 @@ export function TicketsPage() {
   const running = busy || job?.status === "running";
   const activeId = tickets && running ? handlingId(tickets) : null;
 
+  function selectProject(id: string) {
+    if (id === projectId) {
+      return;
+    }
+    setProjectId(id);
+    setTickets(null);
+    setOpenId(null);
+    setReport(null);
+  }
+
   return (
     <AppShell>
       <main className="shell shell-app">
@@ -270,6 +308,22 @@ export function TicketsPage() {
             <p className="eyebrow">Workspace</p>
             <h1>Resolve tickets</h1>
           </div>
+          {projects && projects.length > 0 ? (
+            <div className="seg" role="tablist" aria-label="Project">
+              {projects.map((project) => (
+                <button
+                  key={project.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={project.id === projectId}
+                  className={project.id === projectId ? "seg-btn on" : "seg-btn"}
+                  onClick={() => selectProject(project.id)}
+                >
+                  {project.product_name || project.name}
+                </button>
+              ))}
+            </div>
+          ) : null}
         </div>
         {error ? (
           <p className="form-error studio-error" role="alert">

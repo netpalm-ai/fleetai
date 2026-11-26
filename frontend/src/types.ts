@@ -1,3 +1,10 @@
+export type Project = {
+  id: string;
+  name: string;
+  org: string | null;
+  product_name: string | null;
+};
+
 export type Ticket = {
   id: string;
   status: string;

@@ -1,3 +1,3 @@
-The solver and verifier read codebase/code-context.md.
-That file is the product map: repositories, tests, and branch rules.
-The parser does not write it. Set FLEETAI_PRODUCT_ROOT to the product checkouts.
+The runner does not read codebase/code-context.md.
+A project's map is the project_contexts row for that projects.id.
+JarvisMD is stored with org HBA. FleetAI is stored with org Netpalm.AI. codebase_context is the map. A user's row sets user_id.

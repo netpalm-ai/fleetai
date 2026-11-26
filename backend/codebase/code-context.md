@@ -1,6 +1,4 @@
-# JarvisMD / HBA product code
-
-This file is the customer adapter. The runner does not assume this product.
+# JarvisMD
 
 ## Product root
 

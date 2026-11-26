@@ -65,6 +65,30 @@ class TicketStorageTests(unittest.TestCase):
             self.client, email=EMAIL, password=PASSWORD, username="ada"
         )
         self.assertIn(COOKIE_NAME, self.client.cookies)
+        with db.get_pool().connection() as conn:
+            project_id = conn.execute(
+                "INSERT INTO projects (user_id, name) VALUES (%s, 'acme') RETURNING id",
+                (self.user_id,),
+            ).fetchone()["id"]
+            conn.execute(
+                """
+                INSERT INTO github_connections (user_id, github_login, access_token, project_name, project_id)
+                VALUES (%s, 'octocat', 'token', 'acme', %s)
+                """,
+                (self.user_id, project_id),
+            )
+            conn.execute(
+                """
+                INSERT INTO project_contexts (project_id, user_id, org, product_name, codebase_context, tech_stack)
+                VALUES (%s, %s, 'acme', 'FleetAI', %s, 'python, postgres')
+                """,
+                (
+                    project_id,
+                    self.user_id,
+                    "# Product\n\n## Repositories\n\n| app | . | local | demo |\n\n## Tech stack\n\npython, postgres\n",
+                ),
+            )
+            conn.commit()
 
     def tearDown(self) -> None:
         self.cm.__exit__(None, None, None)
@@ -393,10 +417,62 @@ class TicketStorageTests(unittest.TestCase):
 
     def test_job_runs_through_the_api(self) -> None:
         intakes.sync_tickets(self.user_id, None, [_ticket("T1")])
-        with patch("llm.cursor.run", return_value=SimpleNamespace(id="run-1", result="VERDICT: ready")):
+        with (
+            patch("connections.github.prepare", return_value=None),
+            patch("llm.cursor.run", return_value=SimpleNamespace(id="run-1", result="VERDICT: ready")),
+        ):
             started = self.client.post("/tickets/T1/solve", headers=CSRF)
         self.assertEqual(started.status_code, 202)
         job = self.client.get("/jobs/{0}".format(started.json()["id"])).json()
         self.assertEqual(job["status"], "done")
         self.assertEqual(job["run_id"], "run-1")
         self.assertIsNotNone(config.load_job(self.user_id, job["id"]))
+
+    def test_minh_sees_a_different_list_for_each_project(self) -> None:
+        register_verify_login(
+            self.client,
+            email="Minh@netpalm.ai",
+            password=PASSWORD,
+            username="minh",
+            first_name="Minh",
+            last_name="Netpalm",
+        )
+        with db.get_pool().connection() as conn:
+            db._seed_minh_projects(conn)
+            conn.commit()
+        listed = self.client.get("/projects")
+        self.assertEqual(listed.status_code, 200, listed.text)
+        by_name = {row["name"]: row for row in listed.json()}
+        self.assertEqual(sorted(by_name), ["FleetAI", "JarvisMD"])
+        self.assertEqual(by_name["JarvisMD"]["org"], "HBA")
+        self.assertEqual(by_name["FleetAI"]["org"], "Netpalm.AI")
+        jarvis = self.client.get("/tickets", params={"project_id": by_name["JarvisMD"]["id"]})
+        fleet = self.client.get("/tickets", params={"project_id": by_name["FleetAI"]["id"]})
+        self.assertEqual(jarvis.status_code, 200, jarvis.text)
+        self.assertEqual(fleet.status_code, 200, fleet.text)
+        self.assertEqual([row["id"] for row in jarvis.json()], ["J1", "J2", "J3", "J4"])
+        self.assertEqual([row["id"] for row in fleet.json()], ["T1", "T2", "T3", "T4", "T5", "T6", "T7"])
+        self.assertEqual(jarvis.json()[0]["title"], "Annotated text missing while live text is present")
+        self.assertEqual(fleet.json()[0]["title"], "The form takes the page")
+
+    def test_a_ticket_cannot_use_another_users_project(self) -> None:
+        other = register_verify_login(
+            self.client,
+            email="other@example.com",
+            password=PASSWORD,
+            username="other",
+        )
+        with db.get_pool().connection() as conn:
+            project_id = conn.execute(
+                "SELECT id FROM projects WHERE user_id = %s",
+                (self.user_id,),
+            ).fetchone()["id"]
+            with self.assertRaises(psycopg.errors.ForeignKeyViolation):
+                conn.execute(
+                    """
+                    INSERT INTO tickets (public_id, user_id, project_id, title, status)
+                    VALUES ('X1', %s, %s, 'nope', 'unresolved')
+                    """,
+                    (other, project_id),
+                )
+            conn.rollback()
