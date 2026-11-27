@@ -297,7 +297,7 @@ def run_memory(project_id: UUID) -> str:
         rows = conn.execute(
             """
             SELECT outcome, commit_sha, users_before, users_after, health
-            FROM instruction_runs
+            FROM deploy_runs
             WHERE project_id = %s
             ORDER BY created_at DESC
             LIMIT 5
@@ -327,7 +327,7 @@ def begin_push_run(project_id: UUID, instruction: str, clone: Path) -> None:
     with db.get_pool().connection() as conn:
         conn.execute(
             """
-            INSERT INTO instruction_runs (
+            INSERT INTO deploy_runs (
               project_id, instruction, commit_sha, test_command, users_before, outcome
             )
             VALUES (%s, %s, %s, %s, %s, 'pushing')
@@ -347,7 +347,7 @@ def fail_pushing_run(project_id: UUID) -> None:
     with db.get_pool().connection() as conn:
         conn.execute(
             """
-            UPDATE instruction_runs
+            UPDATE deploy_runs
             SET outcome = 'failed', health = 'down'
             WHERE project_id = %s AND outcome = 'pushing'
             """,
@@ -361,7 +361,7 @@ def finish_pushing_runs(health: str) -> None:
         rows = conn.execute(
             """
             SELECT id, users_before
-            FROM instruction_runs
+            FROM deploy_runs
             WHERE outcome = 'pushing'
             ORDER BY created_at
             """
@@ -374,7 +374,7 @@ def finish_pushing_runs(health: str) -> None:
             ok = health == "ok" and (before is None or after >= int(before))
             conn.execute(
                 """
-                UPDATE instruction_runs
+                UPDATE deploy_runs
                 SET users_after = %s, health = %s, outcome = %s
                 WHERE id = %s AND outcome = 'pushing'
                 """,
@@ -388,7 +388,7 @@ def refuse_failed_run(project_id: UUID, health: str | None = None) -> None:
         row = conn.execute(
             """
             SELECT id, outcome, users_before
-            FROM instruction_runs
+            FROM deploy_runs
             WHERE project_id = %s
             ORDER BY created_at DESC
             LIMIT 1
@@ -404,7 +404,7 @@ def refuse_failed_run(project_id: UUID, health: str | None = None) -> None:
         with db.get_pool().connection() as conn:
             conn.execute(
                 """
-                UPDATE instruction_runs
+                UPDATE deploy_runs
                 SET users_after = %s, health = %s, outcome = 'published'
                 WHERE id = %s AND outcome = 'failed'
                 """,

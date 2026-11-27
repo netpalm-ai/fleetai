@@ -454,7 +454,7 @@ class TicketStorageTests(unittest.TestCase):
             ).fetchone()
         self.assertTrue(row["backfilled"])
 
-    def test_instruction_run_survives_and_blocks_the_next_one(self) -> None:
+    def test_deploy_run_survives_and_blocks_the_next_one(self) -> None:
         with db.get_pool().connection() as conn:
             project_id = conn.execute(
                 "SELECT id FROM projects WHERE user_id = %s AND name = 'acme'",
@@ -462,7 +462,7 @@ class TicketStorageTests(unittest.TestCase):
             ).fetchone()["id"]
             conn.execute(
                 """
-                INSERT INTO instruction_runs (project_id, instruction, users_before, outcome)
+                INSERT INTO deploy_runs (project_id, instruction, users_before, outcome)
                 VALUES (%s, 'remember the deploy', 100000, 'pushing')
                 """,
                 (project_id,),
@@ -471,7 +471,7 @@ class TicketStorageTests(unittest.TestCase):
         selflooper.finish_pushing_runs("ok")
         with db.get_pool().connection() as conn:
             row = conn.execute(
-                "SELECT outcome, users_after, health FROM instruction_runs WHERE project_id = %s",
+                "SELECT outcome, users_after, health FROM deploy_runs WHERE project_id = %s",
                 (project_id,),
             ).fetchone()
         self.assertEqual(row["outcome"], "failed")
@@ -482,7 +482,7 @@ class TicketStorageTests(unittest.TestCase):
         with db.get_pool().connection() as conn:
             conn.execute("DELETE FROM tickets WHERE user_id = %s", (self.user_id,))
             conn.commit()
-            kept = conn.execute("SELECT count(*) AS n FROM instruction_runs").fetchone()["n"]
+            kept = conn.execute("SELECT count(*) AS n FROM deploy_runs").fetchone()["n"]
         self.assertEqual(kept, 1)
 
     def test_job_runs_through_the_api(self) -> None:

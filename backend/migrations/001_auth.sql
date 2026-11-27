@@ -512,7 +512,19 @@ CREATE UNIQUE INDEX intakes_user_type_active_idx
   ON intakes (user_id, type)
   WHERE status = 'active' AND format IN ('txt', 'pdf', 'md');
 
-CREATE TABLE IF NOT EXISTS instruction_runs (
+DO $$
+BEGIN
+  IF to_regclass('public.instruction_runs') IS NOT NULL
+     AND to_regclass('public.deploy_runs') IS NULL THEN
+    ALTER TABLE instruction_runs RENAME TO deploy_runs;
+  END IF;
+  IF to_regclass('public.instruction_runs_project_idx') IS NOT NULL
+     AND to_regclass('public.deploy_runs_project_idx') IS NULL THEN
+    ALTER INDEX instruction_runs_project_idx RENAME TO deploy_runs_project_idx;
+  END IF;
+END $$;
+
+CREATE TABLE IF NOT EXISTS deploy_runs (
   id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   project_id    uuid NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
   instruction   text NOT NULL,
@@ -523,11 +535,11 @@ CREATE TABLE IF NOT EXISTS instruction_runs (
   health        text,
   outcome       text NOT NULL CHECK (outcome IN ('pushing', 'published', 'failed')),
   created_at    timestamptz NOT NULL DEFAULT now(),
-  CONSTRAINT instruction_runs_instruction_len CHECK (char_length(instruction) BETWEEN 1 AND 4000),
-  CONSTRAINT instruction_runs_sha_len CHECK (commit_sha IS NULL OR char_length(commit_sha) BETWEEN 7 AND 64),
-  CONSTRAINT instruction_runs_command_len CHECK (char_length(test_command) <= 2000),
-  CONSTRAINT instruction_runs_health_len CHECK (health IS NULL OR char_length(health) <= 40)
+  CONSTRAINT deploy_runs_instruction_len CHECK (char_length(instruction) BETWEEN 1 AND 4000),
+  CONSTRAINT deploy_runs_sha_len CHECK (commit_sha IS NULL OR char_length(commit_sha) BETWEEN 7 AND 64),
+  CONSTRAINT deploy_runs_command_len CHECK (char_length(test_command) <= 2000),
+  CONSTRAINT deploy_runs_health_len CHECK (health IS NULL OR char_length(health) <= 40)
 );
 
-CREATE INDEX IF NOT EXISTS instruction_runs_project_idx
-  ON instruction_runs (project_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS deploy_runs_project_idx
+  ON deploy_runs (project_id, created_at DESC);
