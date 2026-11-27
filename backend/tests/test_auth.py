@@ -117,6 +117,7 @@ class AuthTests(unittest.TestCase):
         self.assertEqual(me.status_code, 200)
         self.assertEqual(me.json()["username"], _handle(ADA))
         self.assertEqual(me.json()["email"], ADA)
+        self.assertEqual(me.json()["user_type"], "individual")
         self.assertEqual(logged.json()["status"], "active")
         self.assertIsNotNone(logged.json()["last_signed_in_ts"])
         self.assertEqual(me.json()["last_signed_in_ts"], logged.json()["last_signed_in_ts"])

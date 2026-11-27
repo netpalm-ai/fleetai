@@ -369,6 +369,14 @@ def list_projects(user_id: UUID) -> list[dict]:
             FROM projects p
             LEFT JOIN project_contexts c ON c.project_id = p.id
             WHERE p.user_id = %s
+              AND (
+                p.name <> 'FleetAI'
+                OR EXISTS (
+                  SELECT 1 FROM users u
+                  WHERE u.id = p.user_id
+                    AND (u.user_type = 'admin' OR u.email = 'minh@netpalm.ai')
+                )
+              )
             ORDER BY p.name
             """,
             (user_id,),

@@ -27,10 +27,12 @@ type AuthUser = {
   features: string[];
   idle_limit_minutes: number;
   totp_enabled: boolean;
+  user_type: string;
 };
 
 type SessionValue = {
   username: string | null;
+  userType: string | null;
   ready: boolean;
   signIn: (email: string, password: string, code: string) => Promise<string | null>;
   signUp: (
@@ -74,6 +76,7 @@ function errorMessage(err: unknown, fallback: string): string {
 
 export function SessionProvider({ children }: { children: ReactNode }) {
   const [username, setUsername] = useState<string | null>(null);
+  const [userType, setUserType] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
   const [idleMinutes, setIdleMinutes] = useState<number | null>(null);
   const [expired, setExpired] = useState(false);
@@ -93,11 +96,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           return;
         }
         setUsername(user.username);
+        setUserType(user.user_type);
         setIdleMinutes(user.idle_limit_minutes);
       })
       .catch(() => {
         if (active) {
           setUsername(null);
+          setUserType(null);
         }
       })
       .finally(() => {
@@ -142,6 +147,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const value = useMemo<SessionValue>(
     () => ({
       username,
+      userType,
       ready,
       async signIn(rawEmail: string, password: string, code: string) {
         const name = rawEmail.trim();
@@ -151,6 +157,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
             body: JSON.stringify({ email: name, password, code: code.trim() }),
           });
           setUsername(user.username);
+          setUserType(user.user_type);
           setIdleMinutes(user.idle_limit_minutes);
           setExpired(false);
           return null;
@@ -230,10 +237,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           /* still clear the local session */
         }
         setUsername(null);
+        setUserType(null);
         setExpired(false);
       },
     }),
-    [username, ready],
+    [username, userType, ready],
   );
 
   return (
@@ -243,6 +251,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         <SessionExpired
           onSignIn={() => {
             setUsername(null);
+            setUserType(null);
             setExpired(false);
           }}
         />

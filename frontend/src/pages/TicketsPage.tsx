@@ -82,7 +82,7 @@ function imageKind(file: File): "png" | "jpeg" | "webp" | null {
 }
 
 export function TicketsPage() {
-  const { username } = useSession();
+  const { username, userType } = useSession();
   const [email, setEmail] = useState("");
   const [listText, setListText] = useState("");
   const [context, setContext] = useState("");
@@ -98,6 +98,10 @@ export function TicketsPage() {
   const [runIds, setRunIds] = useState<string[]>([]);
   const listedIds = useRef<Set<string> | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [instruction, setInstruction] = useState("");
+  const [improving, setImproving] = useState(false);
+  const [improveError, setImproveError] = useState<string | null>(null);
+  const improvePoll = useRef<number | null>(null);
   const [job, setJob] = useState<Job | null>(null);
   const [busy, setBusy] = useState(false);
   const [openId, setOpenId] = useState<string | null>(null);
@@ -175,8 +179,62 @@ export function TicketsPage() {
       if (poll.current != null) {
         window.clearInterval(poll.current);
       }
+      if (improvePoll.current != null) {
+        window.clearInterval(improvePoll.current);
+      }
     };
   }, []);
+
+  function runInstruction() {
+    const text = instruction.trim();
+    if (!text || improving) {
+      return;
+    }
+    setImproving(true);
+    setImproveError(null);
+    request<Job>("/self-improve", { method: "POST", body: JSON.stringify({ instruction: text }) })
+      .then((started) => {
+        if (improvePoll.current != null) {
+          window.clearInterval(improvePoll.current);
+        }
+        improvePoll.current = window.setInterval(() => {
+          getJson<Job>("/jobs/" + started.id)
+            .then((next) => {
+              if (next.status !== "done" && next.status !== "error") {
+                return;
+              }
+              if (improvePoll.current != null) {
+                window.clearInterval(improvePoll.current);
+                improvePoll.current = null;
+              }
+              setImproving(false);
+              if (next.status === "error") {
+                setImproveError(next.error || "The run failed.");
+              }
+            })
+            .catch((err: unknown) => {
+              if (improvePoll.current != null) {
+                window.clearInterval(improvePoll.current);
+                improvePoll.current = null;
+              }
+              setImproving(false);
+              setImproveError(requestError(err, "The run failed.") || "The run failed.");
+            });
+        }, 2000);
+      })
+      .catch((err: unknown) => {
+        setImproving(false);
+        if (err instanceof ApiError && err.status === 403) {
+          setImproveError("This account cannot run an improvement.");
+          return;
+        }
+        if (err instanceof ApiError && err.status === 409) {
+          setImproveError("A run is already in progress.");
+          return;
+        }
+        setImproveError(requestError(err, "Could not start the run.") || "Could not start the run.");
+      });
+  }
 
   function stopPoll() {
     if (poll.current != null) {
@@ -422,6 +480,34 @@ export function TicketsPage() {
           <p className="form-error studio-error" role="alert">
             {error}
           </p>
+        ) : null}
+
+        {userType === "admin" ? (
+          <section className="intake improve">
+            <label className="field">
+              Instruction
+              <textarea
+                name="instruction"
+                rows={4}
+                placeholder="Tell FleetAI what to improve."
+                value={instruction}
+                onChange={(event) => setInstruction(event.target.value)}
+              />
+            </label>
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={improving || instruction.trim() === ""}
+              onClick={runInstruction}
+            >
+              {improving ? "Running…" : "Run"}
+            </button>
+            {improveError ? (
+              <p className="form-error" role="alert">
+                {improveError}
+              </p>
+            ) : null}
+          </section>
         ) : null}
 
         <div className="studio">

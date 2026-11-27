@@ -543,3 +543,15 @@ CREATE TABLE IF NOT EXISTS deploy_runs (
 
 CREATE INDEX IF NOT EXISTS deploy_runs_project_idx
   ON deploy_runs (project_id, created_at DESC);
+
+ALTER TABLE users ADD COLUMN IF NOT EXISTS user_type text NOT NULL DEFAULT 'individual';
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'users_user_type_chk') THEN
+    ALTER TABLE users
+      ADD CONSTRAINT users_user_type_chk CHECK (user_type IN ('admin', 'individual'));
+  END IF;
+END $$;
+
+UPDATE users SET user_type = 'admin' WHERE email = 'minh@netpalm.ai' AND user_type IS DISTINCT FROM 'admin';

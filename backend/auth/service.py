@@ -32,7 +32,7 @@ PASSWORD_RESET_MINUTES = 60
 PASSWORD_RESET_RESEND_MINUTES = 5
 _EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 USER_COLS = """
-u.id, u.username, u.first_name, u.last_name, u.email,
+u.id, u.username, u.first_name, u.last_name, u.email, u.user_type,
 u.status, u.last_signed_in_ts, u.totp_enabled,
 pt.status AS subscription_status,
 us.product_id AS registered_product,
@@ -65,6 +65,7 @@ class User:
     first_name: str
     last_name: str
     email: str = ""
+    user_type: str = "individual"
     subscription_status: str = "free"
     registered_product: str = ""
     features: tuple[str, ...] = ()
@@ -122,6 +123,7 @@ def user_from_row(row) -> User:
         first_name=str(row["first_name"] or ""),
         last_name=str(row["last_name"] or ""),
         email=str(row.get("email") or ""),
+        user_type=str(row.get("user_type") or "individual"),
         subscription_status=str(row.get("subscription_status") or "free"),
         registered_product=str(row.get("registered_product") or ""),
         features=_row_features(row),

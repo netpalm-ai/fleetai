@@ -96,6 +96,7 @@ def _user_json(user: User) -> dict:
         "id": str(user.id),
         "username": user.username,
         "email": user.email,
+        "user_type": user.user_type,
         "first_name": user.first_name,
         "last_name": user.last_name,
         "status": user.status,

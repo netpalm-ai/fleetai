@@ -162,6 +162,10 @@ def _seed_minh_projects(conn) -> None:
     if user is None:
         return
     user_id = user["id"]
+    conn.execute(
+        "UPDATE users SET user_type = 'admin' WHERE id = %s AND user_type IS DISTINCT FROM 'admin'",
+        (user_id,),
+    )
     lists = (
         ("JarvisMD", _JARVIS_TICKETS),
         ("FleetAI", _FLEET_TICKETS),

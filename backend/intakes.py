@@ -226,6 +226,17 @@ def list_visible_tickets(user_id: UUID, project_id: UUID | None = None) -> list[
                 OR t.intake_id IS NULL
                 OR i.status = 'active'
               )
+              AND (
+                NOT EXISTS (
+                  SELECT 1 FROM projects sp
+                  WHERE sp.id = t.project_id AND sp.name = 'FleetAI'
+                )
+                OR EXISTS (
+                  SELECT 1 FROM users viewer
+                  WHERE viewer.id = t.user_id
+                    AND (viewer.user_type = 'admin' OR viewer.email = 'minh@netpalm.ai')
+                )
+              )
             ORDER BY t.public_id
             """,
             params,

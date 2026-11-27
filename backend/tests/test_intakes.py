@@ -485,6 +485,41 @@ class TicketStorageTests(unittest.TestCase):
             kept = conn.execute("SELECT count(*) AS n FROM deploy_runs").fetchone()["n"]
         self.assertEqual(kept, 1)
 
+    def test_fleetai_project_is_hidden_from_an_individual(self) -> None:
+        with db.get_pool().connection() as conn:
+            conn.execute(
+                "INSERT INTO projects (user_id, name) VALUES (%s, 'FleetAI')",
+                (self.user_id,),
+            )
+            conn.commit()
+        hidden = self.client.get("/projects")
+        self.assertEqual(hidden.status_code, 200, hidden.text)
+        self.assertNotIn("FleetAI", [row["name"] for row in hidden.json()])
+        denied = self.client.post("/self-improve", json={"instruction": "improve the tickets page"}, headers=CSRF)
+        self.assertEqual(denied.status_code, 403)
+        with db.get_pool().connection() as conn:
+            conn.execute("UPDATE users SET user_type = 'admin' WHERE id = %s", (self.user_id,))
+            conn.commit()
+            project_id = conn.execute(
+                "SELECT id FROM projects WHERE user_id = %s AND name = 'FleetAI'",
+                (self.user_id,),
+            ).fetchone()["id"]
+        shown = self.client.get("/projects")
+        self.assertIn("FleetAI", [row["name"] for row in shown.json()])
+        with (
+            patch.object(selflooper, "fleetai_project", return_value={"id": project_id, "user_id": self.user_id}),
+            patch.object(selflooper, "refuse_failed_run"),
+            patch.object(selflooper, "run_instruction") as run,
+        ):
+            started = self.client.post(
+                "/self-improve",
+                json={"instruction": "improve the tickets page"},
+                headers=CSRF,
+            )
+        self.assertEqual(started.status_code, 202, started.text)
+        self.assertEqual(started.json()["kind"], "improve")
+        run.assert_called_once_with(self.user_id, project_id, "improve the tickets page")
+
     def test_job_runs_through_the_api(self) -> None:
         intakes.sync_tickets(self.user_id, None, [_ticket("T1")])
         with (

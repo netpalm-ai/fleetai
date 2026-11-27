@@ -90,6 +90,10 @@ class ExecuteBody(BaseModel):
     ticket_ids: list[str] = Field(default_factory=list, max_length=200)
 
 
+class InstructionBody(BaseModel):
+    instruction: str = Field(min_length=1, max_length=4000)
+
+
 def _run_job(job: dict, user: User, call) -> None:
     try:
         with config.workflow_lock(user.id, blocking=False):
@@ -105,6 +109,25 @@ def _run_job(job: dict, user: User, call) -> None:
         return
     if job["ticket_id"]:
         job["run_id"] = intakes.latest_run_id(user.id, job["ticket_id"])
+    job["status"] = "done"
+
+
+def _run_improve(job: dict, user: User, instruction: str) -> None:
+    try:
+        with config.workflow_lock(user.id, blocking=False):
+            project = selflooper.fleetai_project()
+            if project["user_id"] != user.id:
+                raise RuntimeError("FleetAI project is missing")
+            selflooper.refuse_failed_run(project["id"])
+            selflooper.run_instruction(user.id, project["id"], instruction)
+    except config.WorkflowBusy as exc:
+        job["status"] = "error"
+        job["error"] = str(exc)
+        return
+    except (SystemExit, RuntimeError, Exception) as exc:
+        job["status"] = "error"
+        job["error"] = str(exc)
+        return
     job["status"] = "done"
 
 
@@ -224,6 +247,24 @@ def github_callback(request: Request, code: str = "", state: str = "", error: st
 @app.get("/projects")
 def get_projects(user: User = Depends(require_tickets)) -> list[dict]:
     return connections.list_projects(user.id)
+
+
+@app.post("/self-improve", status_code=202)
+def post_self_improve(
+    body: InstructionBody,
+    background: BackgroundTasks,
+    user: User = Depends(require_tickets),
+) -> dict:
+    if user.user_type != "admin":
+        raise HTTPException(403, "forbidden")
+    text = body.instruction.strip()
+    if not text:
+        raise HTTPException(422, "invalid")
+    if config.workflow_busy(user.id):
+        _busy()
+    job = config.new_job(user.id, "improve")
+    background.add_task(_run_improve, job, user, text)
+    return dict(job)
 
 
 @app.get("/tickets")
