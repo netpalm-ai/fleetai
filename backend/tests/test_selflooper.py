@@ -43,6 +43,8 @@ class SelfLooperTests(unittest.TestCase):
             (root / "fleetai" / ".git").mkdir(parents=True)
             with (
                 patch.object(selflooper.db, "open_pool"),
+                patch.object(selflooper, "_probe_health", return_value="ok"),
+                patch.object(selflooper, "finish_pushing_runs"),
                 patch.object(selflooper, "fleetai_project", return_value={"id": project_id, "user_id": user_id}),
                 patch.object(selflooper, "open_ticket_ids", return_value=["T1", "T2"]),
                 patch.object(selflooper, "ensure_code_context", return_value=context),
@@ -98,6 +100,9 @@ class SelfLooperTests(unittest.TestCase):
             with (
                 patch.object(selflooper, "ensure_code_context", return_value=context),
                 patch.object(selflooper, "existing_ids", return_value=["T1"]),
+                patch.object(selflooper, "run_memory", return_value="(none)"),
+                patch.object(selflooper, "begin_push_run"),
+                patch.object(selflooper, "finish_pushing_runs"),
                 patch.object(selflooper, "_status", return_value=""),
                 patch.object(selflooper.connections.github, "checkout_for", checkout),
                 patch.object(selflooper, "product_cwd", return_value=root),
@@ -136,6 +141,7 @@ class SelfLooperTests(unittest.TestCase):
             with (
                 patch.object(selflooper, "ensure_code_context", return_value=context),
                 patch.object(selflooper, "existing_ids", return_value=[]),
+                patch.object(selflooper, "run_memory", return_value="(none)"),
                 patch.object(selflooper, "_status", return_value=""),
                 patch.object(selflooper.connections.github, "checkout_for", lambda *args: _quiet()),
                 patch.object(selflooper, "product_cwd", return_value=root),
@@ -153,19 +159,19 @@ class SelfLooperTests(unittest.TestCase):
     def test_frontend_and_backend_commands(self) -> None:
         commands = selflooper.test_commands(
             ["frontend/src/pages/HomePage.tsx", "backend/solver.py"],
-            "postgresql://fleetai:test@postgres:5432/fleetai",
+            "postgresql://fleetai:test@127.0.0.1:5432/fleetai",
         )
         self.assertEqual(commands[0][1][:2], ["npm", "ci"])
         self.assertEqual(commands[1][1][:3], ["npm", "run", "build"])
         self.assertIn("tests/test_workflow.py", commands[2][1])
 
-    def test_auth_tests_refuse_the_live_database(self) -> None:
+    def test_backend_tests_refuse_the_live_database(self) -> None:
         with self.assertRaises(RuntimeError) as raised:
             selflooper.test_commands(
-                ["backend/auth/sessions.py"],
+                ["backend/solver.py"],
                 "postgresql://fleetai:secret@postgres:5432/fleetai",
             )
-        self.assertEqual(str(raised.exception), "auth tests need a disposable database")
+        self.assertEqual(str(raised.exception), "tests need a disposable database")
 
     def test_publish_merges_dev_into_main(self) -> None:
         calls: list[tuple] = []

@@ -10,6 +10,7 @@ import json
 import os
 import subprocess
 import sys
+import urllib.request
 from pathlib import Path
 from urllib.parse import urlparse
 from uuid import UUID
@@ -57,6 +58,9 @@ Return a JSON array only. Each object must have:
 
 EXISTING IDS
 {existing}
+
+PREVIOUS RUNS
+{runs}
 
 CODE CONTEXT
 {context}
@@ -192,8 +196,8 @@ def test_commands(paths: list[str], database_url: str) -> list[tuple[str, list[s
         commands.append(("frontend", ["npm", "ci"]))
         commands.append(("frontend", ["npm", "run", "build"]))
     backend = [path for path in paths if path.startswith("backend/")]
-    if any(path.startswith("backend/auth/") for path in backend) and not _disposable_database(database_url):
-        raise RuntimeError("auth tests need a disposable database")
+    if backend and not _disposable_database(database_url):
+        raise RuntimeError("tests need a disposable database")
     if any(not path.startswith("backend/auth/") for path in backend):
         commands.append(
             (
@@ -266,9 +270,157 @@ def publish(clone: Path, instruction: str) -> None:
         _git(clone, token, "checkout", DEV_BRANCH)
 
 
-def breakdown_prompt(instruction: str, context: str, used: list[str]) -> str:
+def _user_count() -> int:
+    with db.get_pool().connection() as conn:
+        return int(conn.execute("SELECT count(*) AS n FROM users").fetchone()["n"])
+
+
+def _probe_health() -> str:
+    try:
+        with urllib.request.urlopen("http://127.0.0.1:8000/health", timeout=3) as response:
+            if response.status == 200:
+                return "ok"
+    except Exception:
+        return "down"
+    return "down"
+
+
+def _clip(text: str, limit: int) -> str:
+    collapsed = " ".join(text.split())
+    if len(collapsed) <= limit:
+        return collapsed
+    return collapsed[:limit]
+
+
+def run_memory(project_id: UUID) -> str:
+    with db.get_pool().connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT outcome, commit_sha, users_before, users_after, health
+            FROM instruction_runs
+            WHERE project_id = %s
+            ORDER BY created_at DESC
+            LIMIT 5
+            """,
+            (project_id,),
+        ).fetchall()
+    if not rows:
+        return "(none)"
+    lines = []
+    for row in rows:
+        lines.append(
+            "{0} {1} users {2}->{3} health {4}".format(
+                row["outcome"],
+                row["commit_sha"] or "-",
+                "-" if row["users_before"] is None else row["users_before"],
+                "-" if row["users_after"] is None else row["users_after"],
+                row["health"] or "-",
+            )
+        )
+    return "\n".join(lines)
+
+
+def begin_push_run(project_id: UUID, instruction: str, clone: Path) -> None:
+    described = ", ".join(
+        " ".join(command) for _relative, command in test_commands(changed_paths(clone), os.getenv("DATABASE_URL") or "")
+    )
+    with db.get_pool().connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO instruction_runs (
+              project_id, instruction, commit_sha, test_command, users_before, outcome
+            )
+            VALUES (%s, %s, %s, %s, %s, 'pushing')
+            """,
+            (
+                project_id,
+                _clip(instruction, 4000),
+                _clip(_git(clone, None, "rev-parse", "HEAD"), 64),
+                _clip(described, 2000),
+                _user_count(),
+            ),
+        )
+        conn.commit()
+
+
+def fail_pushing_run(project_id: UUID) -> None:
+    with db.get_pool().connection() as conn:
+        conn.execute(
+            """
+            UPDATE instruction_runs
+            SET outcome = 'failed', health = 'down'
+            WHERE project_id = %s AND outcome = 'pushing'
+            """,
+            (project_id,),
+        )
+        conn.commit()
+
+
+def finish_pushing_runs(health: str) -> None:
+    with db.get_pool().connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, users_before
+            FROM instruction_runs
+            WHERE outcome = 'pushing'
+            ORDER BY created_at
+            """
+        ).fetchall()
+        if not rows:
+            return
+        after = int(conn.execute("SELECT count(*) AS n FROM users").fetchone()["n"])
+        for row in rows:
+            before = row["users_before"]
+            ok = health == "ok" and (before is None or after >= int(before))
+            conn.execute(
+                """
+                UPDATE instruction_runs
+                SET users_after = %s, health = %s, outcome = %s
+                WHERE id = %s AND outcome = 'pushing'
+                """,
+                (after, _clip(health, 40), "published" if ok else "failed", row["id"]),
+            )
+        conn.commit()
+
+
+def refuse_failed_run(project_id: UUID, health: str | None = None) -> None:
+    with db.get_pool().connection() as conn:
+        row = conn.execute(
+            """
+            SELECT id, outcome, users_before
+            FROM instruction_runs
+            WHERE project_id = %s
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            (project_id,),
+        ).fetchone()
+    if row is None or row["outcome"] != "failed":
+        return
+    observed = _probe_health() if health is None else health
+    after = _user_count()
+    before = row["users_before"]
+    if observed == "ok" and (before is None or after >= int(before)):
+        with db.get_pool().connection() as conn:
+            conn.execute(
+                """
+                UPDATE instruction_runs
+                SET users_after = %s, health = %s, outcome = 'published'
+                WHERE id = %s AND outcome = 'failed'
+                """,
+                (after, observed, row["id"]),
+            )
+            conn.commit()
+        return
+    raise RuntimeError(
+        "last instruction failed. Refusing a new one until the live service is healthy and the user count has not fallen."
+    )
+
+
+def breakdown_prompt(instruction: str, context: str, used: list[str], runs: str) -> str:
     return _BREAKDOWN.format(
         existing="\n".join(used) or "(none)",
+        runs=runs,
         context=context,
         instruction=instruction.strip(),
     )
@@ -290,7 +442,9 @@ def run_instruction(user_id: UUID, project_id: UUID, instruction: str) -> None:
             raise RuntimeError("FleetAI checkout is missing")
         if _status(clone).strip():
             raise RuntimeError("FleetAI checkout is dirty")
-        tickets = tickets_from_text(analyze(breakdown_prompt(instruction, context, existing_ids(user_id))))
+        tickets = tickets_from_text(
+            analyze(breakdown_prompt(instruction, context, existing_ids(user_id), run_memory(project_id)))
+        )
         if _status(clone).strip():
             raise RuntimeError("analysis edited the checkout")
         if not tickets:
@@ -307,7 +461,13 @@ def run_instruction(user_id: UUID, project_id: UUID, instruction: str) -> None:
         if missing:
             raise RuntimeError("not fixed: {0}".format(", ".join(missing)))
         run_tests(clone)
-        publish(clone, instruction)
+        begin_push_run(project_id, instruction, clone)
+        try:
+            publish(clone, instruction)
+        except RuntimeError:
+            fail_pushing_run(project_id)
+            raise
+        finish_pushing_runs(_probe_health())
     close_fixed(user_id, ticket_ids)
 
 
@@ -327,12 +487,14 @@ def resolve_open(user_id: UUID, project_id: UUID) -> None:
 
 def main(instruction: str = "") -> None:
     db.open_pool()
+    finish_pushing_runs(_probe_health())
     project = fleetai_project()
     user_id = project["user_id"]
     project_id = project["id"]
     text = instruction.strip()
     if text:
         print("instruction {0}".format(text), flush=True)
+        refuse_failed_run(project_id)
         run_instruction(user_id, project_id, text)
         return
     resolve_open(user_id, project_id)

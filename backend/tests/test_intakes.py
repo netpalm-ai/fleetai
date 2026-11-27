@@ -21,6 +21,7 @@ import db
 import intakes
 import orchestrator
 import parser
+import selflooper
 import solver
 import verifier
 from auth.sessions import COOKIE_NAME
@@ -312,8 +313,20 @@ class TicketStorageTests(unittest.TestCase):
         self.assertIsNone(intakes.get_run(other, "T1", "run-1"))
         self.assertEqual(intakes.open_tickets(other), [])
 
-    def test_free_tier_deletes_a_handled_ticket_immediately(self) -> None:
+    def test_free_tier_keeps_a_handled_ticket_for_one_minute(self) -> None:
         self._solve_and_verify("T1", "fixed")
+        self.assertEqual(intakes.find_ticket(self.user_id, "T1")["status"], "fixed")
+        with db.get_pool().connection() as conn:
+            conn.execute(
+                """
+                UPDATE tickets
+                SET handled_at = now() - interval '2 minutes'
+                WHERE user_id = %s AND public_id = 'T1'
+                """,
+                (self.user_id,),
+            )
+            conn.commit()
+        intakes.purge_handled()
         self.assertIsNone(intakes.find_ticket(self.user_id, "T1"))
         with db.get_pool().connection() as conn:
             runs = conn.execute("SELECT count(*) AS n FROM ticket_runs").fetchone()["n"]
@@ -328,6 +341,18 @@ class TicketStorageTests(unittest.TestCase):
         completed = self.client.post("/tickets/T1/complete", headers=CSRF)
         self.assertEqual(completed.status_code, 200)
         self.assertEqual(completed.json()["status"], "completed")
+        self.assertEqual(intakes.find_ticket(self.user_id, "T1")["status"], "completed")
+        with db.get_pool().connection() as conn:
+            conn.execute(
+                """
+                UPDATE tickets
+                SET handled_at = now() - interval '2 minutes'
+                WHERE user_id = %s AND public_id = 'T1'
+                """,
+                (self.user_id,),
+            )
+            conn.commit()
+        intakes.purge_handled()
         self.assertIsNone(intakes.find_ticket(self.user_id, "T1"))
 
     def test_trial_keeps_handled_tickets_for_seven_days(self) -> None:
@@ -428,6 +453,37 @@ class TicketStorageTests(unittest.TestCase):
                 (self.user_id,),
             ).fetchone()
         self.assertTrue(row["backfilled"])
+
+    def test_instruction_run_survives_and_blocks_the_next_one(self) -> None:
+        with db.get_pool().connection() as conn:
+            project_id = conn.execute(
+                "SELECT id FROM projects WHERE user_id = %s AND name = 'acme'",
+                (self.user_id,),
+            ).fetchone()["id"]
+            conn.execute(
+                """
+                INSERT INTO instruction_runs (project_id, instruction, users_before, outcome)
+                VALUES (%s, 'remember the deploy', 100000, 'pushing')
+                """,
+                (project_id,),
+            )
+            conn.commit()
+        selflooper.finish_pushing_runs("ok")
+        with db.get_pool().connection() as conn:
+            row = conn.execute(
+                "SELECT outcome, users_after, health FROM instruction_runs WHERE project_id = %s",
+                (project_id,),
+            ).fetchone()
+        self.assertEqual(row["outcome"], "failed")
+        self.assertEqual(row["health"], "ok")
+        self.assertGreaterEqual(row["users_after"], 1)
+        with self.assertRaises(RuntimeError):
+            selflooper.refuse_failed_run(project_id, health="ok")
+        with db.get_pool().connection() as conn:
+            conn.execute("DELETE FROM tickets WHERE user_id = %s", (self.user_id,))
+            conn.commit()
+            kept = conn.execute("SELECT count(*) AS n FROM instruction_runs").fetchone()["n"]
+        self.assertEqual(kept, 1)
 
     def test_job_runs_through_the_api(self) -> None:
         intakes.sync_tickets(self.user_id, None, [_ticket("T1")])

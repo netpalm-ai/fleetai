@@ -250,6 +250,7 @@ class LastVerdictTests(unittest.TestCase):
         self.assertEqual(last_verdict("**VERDICT: blocked**"), BLOCKED)
         self.assertEqual(last_verdict("`VERDICT: fixed`"), FIXED)
         self.assertEqual(last_verdict("VERDICT: failed"), FAILED)
+        self.assertEqual(last_verdict("VERDICT: fixed."), FIXED)
         self.assertIsNone(last_verdict("no verdict here"))
         self.assertIsNone(last_verdict(None))
 
@@ -576,13 +577,25 @@ class CursorImageTests(unittest.TestCase):
 
     def test_run_without_images_still_sends_a_string(self) -> None:
         result = SimpleNamespace(status="ok", id="run-1", result="done")
+        seen: list[bool] = []
+
+        def capture(message, _options):
+            import os
+
+            seen.append("DATABASE_URL" not in os.environ)
+            self.assertEqual(message, "PROMPT-TEXT")
+            return result
+
         with (
-            patch.dict("os.environ", {"CURSOR_API_KEY": "test-key"}, clear=False),
+            patch.dict("os.environ", {"CURSOR_API_KEY": "test-key", "DATABASE_URL": "postgresql://live"}, clear=False),
             patch.object(llm, "product_cwd", return_value=Path("/tmp")),
-            patch("cursor_sdk.Agent.prompt", return_value=result) as prompt,
+            patch("cursor_sdk.Agent.prompt", side_effect=capture),
         ):
             llm.cursor.run("PROMPT-TEXT")
-        self.assertEqual(prompt.call_args.args[0], "PROMPT-TEXT")
+            import os
+
+            self.assertEqual(os.environ.get("DATABASE_URL"), "postgresql://live")
+        self.assertEqual(seen, [True])
 
     def test_solve_stores_text_prompt_not_image_bytes(self) -> None:
         user_id = uuid4()

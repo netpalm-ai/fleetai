@@ -14,7 +14,7 @@ _KEEP_FOR = """
 CASE COALESCE(pt.status, 'free')
   WHEN 'trial' THEN interval '7 days'
   WHEN 'paid' THEN make_interval(days => us.ticket_retention_days)
-  ELSE interval '0'
+  ELSE interval '1 minute'
 END
 """
 _USER_TIER_JOINS = """

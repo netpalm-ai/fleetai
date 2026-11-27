@@ -511,3 +511,23 @@ DROP INDEX IF EXISTS intakes_user_type_active_idx;
 CREATE UNIQUE INDEX intakes_user_type_active_idx
   ON intakes (user_id, type)
   WHERE status = 'active' AND format IN ('txt', 'pdf', 'md');
+
+CREATE TABLE IF NOT EXISTS instruction_runs (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id    uuid NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  instruction   text NOT NULL,
+  commit_sha    text,
+  test_command  text NOT NULL DEFAULT '',
+  users_before  integer,
+  users_after   integer,
+  health        text,
+  outcome       text NOT NULL CHECK (outcome IN ('pushing', 'published', 'failed')),
+  created_at    timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT instruction_runs_instruction_len CHECK (char_length(instruction) BETWEEN 1 AND 4000),
+  CONSTRAINT instruction_runs_sha_len CHECK (commit_sha IS NULL OR char_length(commit_sha) BETWEEN 7 AND 64),
+  CONSTRAINT instruction_runs_command_len CHECK (char_length(test_command) <= 2000),
+  CONSTRAINT instruction_runs_health_len CHECK (health IS NULL OR char_length(health) <= 40)
+);
+
+CREATE INDEX IF NOT EXISTS instruction_runs_project_idx
+  ON instruction_runs (project_id, created_at DESC);

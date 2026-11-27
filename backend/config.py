@@ -431,7 +431,7 @@ def last_verdict(text: str | None) -> str | None:
         "verdict: blocked": BLOCKED,
     }
     for line in reversed(text.strip().splitlines()):
-        found = allowed.get(line.strip().strip("*").strip("`").lower())
+        found = allowed.get(line.strip().strip("*").strip("`").lower().rstrip(".").strip())
         if found:
             return found
     return None

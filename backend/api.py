@@ -14,6 +14,7 @@ import db
 import intakes
 import orchestrator
 import parser
+import selflooper
 import solver
 import verifier
 from auth.deps import get_current_user, require_csrf
@@ -34,6 +35,7 @@ async def lifespan(_app: FastAPI):
     global _cleanup_stop
     db.open_pool()
     if db.pool is not None:
+        selflooper.finish_pushing_runs("ok")
         _cleanup_stop = start_cleanup(intakes.purge_handled)
     yield
     if _cleanup_stop is not None:

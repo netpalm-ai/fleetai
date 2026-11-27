@@ -138,10 +138,15 @@ class Cursor:
                 text=prompt,
                 images=[SDKImage.from_data(data, "image/" + fmt) for fmt, data in images],
             )
-        result = Agent.prompt(
-            message,
-            AgentOptions(api_key=api_key, model=model, local=LocalAgentOptions(cwd=str(product_cwd()))),
-        )
+        database_url = os.environ.pop("DATABASE_URL", None)
+        try:
+            result = Agent.prompt(
+                message,
+                AgentOptions(api_key=api_key, model=model, local=LocalAgentOptions(cwd=str(product_cwd()))),
+            )
+        finally:
+            if database_url is not None:
+                os.environ["DATABASE_URL"] = database_url
         if result.status == "error":
             raise RuntimeError("run failed: {0}".format(result.id))
         return result
