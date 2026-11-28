@@ -47,7 +47,7 @@ Never print passwords, reset tokens, authenticator codes, session cookies, or Gi
 ## Work rules
 
 - Read `fleetai/frontend/AGENTS.md` before a frontend change. Keep the amber glass tokens, `BrandMark`, and the existing button classes. Do not add a component library or a test runner.
-- Self-improve reviews pages in order (`/`, `/login`, `/signup`, `/verify`, `/forgot`, `/reset`, `/terms`, `/workspace`, `/connectors`, `/settings`) before it writes tickets. Public auth/intro pages must not use the signed-in sidebar.
+- Self-improve reviews pages in order (`/`, `/login`, `/signup`, `/verify`, `/forgot`, `/reset`, `/terms`, `/workspace`, `/connectors`, `/settings`), then reviews each product script under `frontend/src`, `backend/*.py`, and `backend/auth`, before it writes tickets. Public auth/intro pages must not use the signed-in sidebar.
 - Do not change schema, auth, secrets, or CI unless the ticket names that work.
 - If a needed file is already dirty from other work, stop. Engineering standard applies.
 

@@ -1,7 +1,8 @@
 """Solve FleetAI from open tickets, or from one instruction. No sign-in.
 
-An instruction starts with a page-by-page product review, then tickets, solve,
-test, and publish by merging fleetai/dev into main. Pushing main is the deploy.
+An instruction starts with a page-by-page and script-by-script review, then
+tickets, solve, test, and publish by merging fleetai/dev into main. Pushing main
+is the deploy.
 """
 
 from __future__ import annotations
