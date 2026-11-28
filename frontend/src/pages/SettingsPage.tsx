@@ -16,13 +16,13 @@ const KEEP_OPTIONS = [
 
 function keepText(days: number | null): string {
   if (days === null) {
-    return "Handled tickets stay visible permanently. They are kept for audit either way.";
+    return "Handled work stays visible permanently. It is kept for audit either way.";
   }
   if (days === 0) {
-    return "Handled tickets are hidden as soon as they are fixed or completed. They are kept for audit.";
+    return "Handled work is hidden as soon as it is fixed or completed. It is kept for audit.";
   }
   return (
-    "Handled tickets stay visible for " +
+    "Handled work stays visible for " +
     String(days) +
     " days after they are fixed or completed. They are kept for audit either way."
   );
@@ -281,7 +281,7 @@ export function SettingsPage() {
             {settings ? (
               <section className="board settings">
                 <div className="board-head">
-                  <h2>Ticket history</h2>
+                  <h2>History</h2>
                 </div>
                 <p className="muted">
                   Plan: {settings.subscription_status.charAt(0).toUpperCase() + settings.subscription_status.slice(1)}
@@ -290,7 +290,7 @@ export function SettingsPage() {
                 {settings.editable ? (
                   <form onSubmit={(event) => void onSave(event)}>
                     <label className="field">
-                      Show handled tickets for
+                      Show handled work for
                       <select
                         value={keep}
                         onChange={(event) => setKeep(event.target.value)}

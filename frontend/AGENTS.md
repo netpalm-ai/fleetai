@@ -11,11 +11,12 @@ dark warm base, cream type, amber pills, glass panels, Fraunces + Hanken Grotesk
 
 Do **not** reuse homepage headlines, taglines, or marketing voice. No
 “The AI layer your company runs on” riffs. Screens are product UI: product
-intro (`/`), Sign in, Create an account, Tickets, Terms of Service.
+intro (`/`), Sign in, Create an account, Workspace, Terms of Service.
 
 `/` describes FleetAI in product language: multiple agents handle and resolve
-tickets from user-supplied context; GitHub for the codebase; Jira and Trello
-for tickets. Copy lives in `HomePage.tsx`. Do not invent extra integrations.
+work from user-supplied context; GitHub for the codebase. Copy lives in
+`HomePage.tsx`. Do not invent extra integrations. The signed-in product is
+Workspace. Do not name a screen, route, or label Tickets.
 
 Tokens in `src/index.css`:
 
@@ -34,14 +35,14 @@ only. No image logo.
 Terms (`/terms`) is a readable legal page with the site header, not a landing
 hero. Copy comes only from `src/data/termsOfService.ts`.
 
-After sign-in, `/workspace` is the intake studio: paste or PDF ticket list, email
-textarea, optional project.md context, then **Resolve tickets**. That posts
+After sign-in, `/workspace` is the intake studio: paste or PDF list, email
+textarea, optional project.md context, then **Resolve**. That posts
 `/api/v1/tickets/inputs` then `/api/v1/execute`, polls `/api/v1/jobs/{id}`, and
-lists tickets from `GET /api/v1/tickets`. No marketing hero.
+lists the work from `GET /api/v1/tickets`. No marketing hero. There is no
+`/tickets` page.
 
 Signed-in pages use a left sidebar (`AppShell`): Projects, Connectors, Settings.
-`/workspace` is the signed-in home. A project in the sidebar opens that project's tickets.
-`/tickets` redirects to `/workspace`.
+`/workspace` is the signed-in home. A project in the sidebar opens that project.
 GitHub lives only under Connectors, never in the top bar. `/settings` is account
 settings (`GET/PUT /api/v1/settings`). `/connectors` is where a customer connects
 GitHub. Do not mention branches, clones, or server setup there.
@@ -61,7 +62,7 @@ src/components/AuthenticatorSetup.tsx  Settings section → POST /api/v1/auth/to
 src/pages/ForgotPasswordPage.tsx  `/forgot` → POST /api/v1/auth/password/forgot
 src/pages/ResetPasswordPage.tsx   `/reset?token=` → POST /api/v1/auth/password/reset
 src/pages/TermsPage.tsx
-src/pages/TicketsPage.tsx
+src/pages/WorkspacePage.tsx `/workspace`
 src/session.tsx            GET /api/v1/auth/me; no localStorage accounts
 ```
 
@@ -77,13 +78,13 @@ passwords or accounts in localStorage. `SessionProvider` signs the user out afte
 `idle_limit_minutes` (from `/auth/me`) without input and shows `SessionExpired`, a
 blurred overlay with a Sign in button. A 401 from a page calls `expire()` to show the
 same dialog. Routes: `/` intro, `/login`, `/signup`,
-`/terms`, `/workspace`, `/connectors`, `/settings`. `/tickets` redirects to `/workspace`.
+`/terms`, `/workspace`, `/connectors`, `/settings`.
 
 ## Backend
 
 Browser calls go through `/api/v1/...`. `v1` is a URL prefix, not a directory.
 Vite (dev) and nginx send `/api/v1/auth` to the auth service (`127.0.0.1:8001` /
-`auth:8000`) and other `/api/v1` paths to the ticket API (`127.0.0.1:8000` /
+`auth:8000`) and other `/api/v1` paths to the API (`127.0.0.1:8000` /
 `backend:8000`). A push that only changes `frontend/` deploys that image and
 leaves auth and the API running. Types must match `backend/api.py` and
 `backend/auth`. No invented API routes.

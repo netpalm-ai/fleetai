@@ -17,7 +17,7 @@ export const TERMS_SECTIONS: TermsSection[] = [
   {
     heading: "2. The Service",
     body: [
-      "FleetAI is a ticket runner. It can parse reports, propose engineering work against a customer product checkout, and record verify and complete outcomes. The Service does not replace your own code review, security review, or production change process.",
+      "FleetAI is a workspace for agents. It can parse reports, propose engineering work against a customer product checkout, and record verify and complete outcomes. The Service does not replace your own code review, security review, or production change process.",
       "We may change features, limits, or availability. We will not use the Service to deploy your product unless you separately instruct a human operator to do so.",
     ],
   },
@@ -31,8 +31,8 @@ export const TERMS_SECTIONS: TermsSection[] = [
   {
     heading: "4. Customer software and data",
     body: [
-      "You retain rights in the product checkouts, tickets, emails, and documents you provide. You grant us a limited license to process that material solely to operate the Service for you.",
-      "Do not upload material you are not allowed to share. Do not paste secrets, credentials, or regulated clinical or personal data into tickets, prompts, or run logs unless your organization has a written process that allows it.",
+      "You retain rights in the product checkouts, work, emails, and documents you provide. You grant us a limited license to process that material solely to operate the Service for you.",
+      "Do not upload material you are not allowed to share. Do not paste secrets, credentials, or regulated clinical or personal data into the workspace, prompts, or run logs unless your organization has a written process that allows it.",
     ],
   },
   {
@@ -67,7 +67,7 @@ export const TERMS_SECTIONS: TermsSection[] = [
     heading: "9. Disclaimer",
     body: [
       "The Service is provided “as is.” We disclaim warranties of merchantability, fitness for a particular purpose, and non-infringement, to the extent the law allows.",
-      "We do not warrant that tickets will be complete, that a solver run will compile, or that a verify verdict matches production.",
+      "We do not warrant that the work will be complete, that a solver run will compile, or that a verify verdict matches production.",
     ],
   },
   {

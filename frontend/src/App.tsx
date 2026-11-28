@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { BrowserRouter, Navigate, Route, Routes, useSearchParams } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { AppShell } from "./components/AppShell";
 import { ForgotPasswordPage } from "./pages/ForgotPasswordPage";
 import { HomePage } from "./pages/HomePage";
@@ -8,7 +8,7 @@ import { ResetPasswordPage } from "./pages/ResetPasswordPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { SignUpPage } from "./pages/SignUpPage";
 import { TermsPage } from "./pages/TermsPage";
-import { TicketsPage } from "./pages/TicketsPage";
+import { WorkspacePage } from "./pages/WorkspacePage";
 import { VerifyPage } from "./pages/VerifyPage";
 import { SessionProvider, useSession } from "./session";
 
@@ -21,12 +21,6 @@ function Home() {
     return <Navigate to="/workspace" replace />;
   }
   return <HomePage />;
-}
-
-function LegacyTickets() {
-  const [params] = useSearchParams();
-  const query = params.toString();
-  return <Navigate to={query ? "/workspace?" + query : "/workspace"} replace />;
 }
 
 function RequireAuth({ children }: { children: ReactNode }) {
@@ -61,11 +55,10 @@ export default function App() {
               path="/workspace"
               element={
                 <RequireAuth>
-                  <TicketsPage />
+                  <WorkspacePage />
                 </RequireAuth>
               }
             />
-            <Route path="/tickets" element={<LegacyTickets />} />
             <Route
               path="/connectors"
               element={

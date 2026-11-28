@@ -5,10 +5,10 @@ const CONNECTIONS = [{ name: "GitHub", use: "Repositories the agents work in." }
 export function HomePage() {
   return (
     <main className="shell intro">
-      <h1>A Fleet of agents that handle and resolve tickets.</h1>
+      <h1>A Fleet of agents that handle and resolve the work.</h1>
       <p className="intro-lede">
-        FleetAI runs multiple agents on the context you provide. They take a
-        ticket, work it against your tools, and resolve it.
+        FleetAI runs multiple agents on the context you provide. They take the
+        work, use your tools, and resolve it.
       </p>
       <div className="intro-actions">
         <Link className="btn btn-primary" to="/login">

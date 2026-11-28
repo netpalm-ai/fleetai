@@ -82,7 +82,7 @@ function imageKind(file: File): "png" | "jpeg" | "webp" | null {
   return null;
 }
 
-export function TicketsPage() {
+export function WorkspacePage() {
   const { username, userType } = useSession();
   const [params, setParams] = useSearchParams();
   const projectId = params.get("project");
@@ -133,7 +133,7 @@ export function TicketsPage() {
       })
       .catch((err: unknown) => {
         if (err instanceof ApiError && err.status === 403) {
-          setError("This account cannot use tickets.");
+          setError("This account cannot use the workspace.");
           return;
         }
         if (err instanceof ApiError && err.status === 409) {
@@ -273,14 +273,14 @@ export function TicketsPage() {
           setBusy(false);
           setRunIds([]);
           if (next.status === "error") {
-            setError(next.error || "Could not resolve tickets. Try again.");
+            setError(next.error || "Could not resolve. Try again.");
           }
         })
         .catch((err: unknown) => {
           setBusy(false);
           setRunIds([]);
           stopPoll();
-          const message = requestError(err, "Could not resolve tickets. Try again.");
+          const message = requestError(err, "Could not resolve. Try again.");
           if (message) {
             setError(message);
           }
@@ -368,7 +368,7 @@ export function TicketsPage() {
       await request<Ticket>("/tickets/" + ticketId + "/complete", { method: "POST" });
       load();
     } catch (err: unknown) {
-      const message = requestError(err, "Could not mark the ticket completed.");
+      const message = requestError(err, "Could not mark it completed.");
       if (message) {
         setError(message);
       }
@@ -445,7 +445,7 @@ export function TicketsPage() {
     } catch (err: unknown) {
       setBusy(false);
       setRunIds([]);
-      const message = requestError(err, "Could not resolve tickets. Try again.");
+      const message = requestError(err, "Could not resolve. Try again.");
       if (message) {
         setError(message);
       }
@@ -510,8 +510,8 @@ export function TicketsPage() {
               />
             </label>
             <div className="field">
-              <label htmlFor="ticket-list">Ticket list</label>
-              <div className="seg" role="tablist" aria-label="Ticket list source">
+              <label htmlFor="work-list">List</label>
+              <div className="seg" role="tablist" aria-label="List source">
                 <button
                   type="button"
                   role="tab"
@@ -542,10 +542,10 @@ export function TicketsPage() {
               </div>
               {listMode === "paste" ? (
                 <textarea
-                  id="ticket-list"
+                  id="work-list"
                   name="list_text"
                   rows={10}
-                  placeholder="Paste the ticket list as raw text."
+                  placeholder="Paste the list as raw text."
                   value={listText}
                   onChange={(event) => setListText(event.target.value)}
                 />
@@ -579,20 +579,17 @@ export function TicketsPage() {
               type="button"
               className="btn btn-primary btn-block resolve-btn"
               disabled={running}
-              onClick={() => void startResolve(openTicketIds(tickets), "No tickets to resolve.", true)}
+              onClick={() => void startResolve(openTicketIds(tickets), "Nothing to resolve.", true)}
             >
-              {running ? "Resolving…" : "Resolve tickets"}
+              {running ? "Resolving…" : "Resolve"}
             </button>
           </section>
 
           <section className="board">
-            <div className="board-head">
-              <h2>Tickets</h2>
-            </div>
-            {tickets == null && projectId && !error ? <p className="muted">Loading tickets…</p> : null}
+            {tickets == null && projectId && !error ? <p className="muted">Loading…</p> : null}
             {tickets && tickets.length === 0 ? (
               <p className="muted">
-                {running ? "Reading the list…" : "No tickets yet. Add a list, then choose Resolve."}
+                {running ? "Reading the list…" : "Nothing here yet. Add a list, then choose Resolve."}
               </p>
             ) : null}
             {tickets && tickets.length > 0 ? (
@@ -665,7 +662,7 @@ export function TicketsPage() {
                 type="button"
                 className="btn btn-ghost btn-block resolve-btn"
                 disabled={running}
-                onClick={() => void startResolve(selected, "Select a ticket.", false)}
+                onClick={() => void startResolve(selected, "Select one.", false)}
               >
                 {running ? "Resolving…" : "Resolve only"}
               </button>
