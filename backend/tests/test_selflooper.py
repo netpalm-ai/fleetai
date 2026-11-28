@@ -120,6 +120,53 @@ class SelfLooperTests(unittest.TestCase):
         self.assertEqual(order, ["dev", "test", "publish"])
         mark.assert_called_once_with(user_id, "copy-home", "completed")
 
+    def test_purged_fixed_ticket_still_publishes(self) -> None:
+        user_id = uuid4()
+        project_id = uuid4()
+        context = "\n".join(selflooper._REQUIRED) + "\n"
+        payload = json.dumps(
+            [
+                {
+                    "id": "auth-pages",
+                    "title": "Auth pages",
+                    "severity": "high",
+                    "services": [],
+                    "context": "AppShell",
+                    "expected": "no sidebar on auth",
+                }
+            ]
+        )
+        order: list[str] = []
+
+        def tests(clone):
+            order.append("test")
+
+        def publish(clone, instruction):
+            order.append("publish")
+
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            (root / "fleetai" / ".git").mkdir(parents=True)
+            with (
+                patch.object(selflooper, "ensure_code_context", return_value=context),
+                patch.object(selflooper, "existing_ids", return_value=[]),
+                patch.object(selflooper, "_status", return_value=""),
+                patch.object(selflooper.connections.github, "checkout_for", lambda *args: _quiet()),
+                patch.object(selflooper, "product_cwd", return_value=root),
+                patch.object(selflooper.reviewer, "review_to_tickets", return_value=payload),
+                patch.object(selflooper, "save_tickets"),
+                patch.object(selflooper.orchestrator, "execute"),
+                patch.object(selflooper.intakes, "find_ticket", return_value=None),
+                patch.object(selflooper, "run_tests", side_effect=tests),
+                patch.object(selflooper, "publish", side_effect=publish),
+                patch.object(selflooper, "begin_push_run"),
+                patch.object(selflooper, "finish_pushing_runs"),
+                patch.object(selflooper.watcher, "review", return_value=None),
+                patch.object(selflooper.intakes, "set_ticket_status"),
+            ):
+                selflooper.run_instruction(user_id, project_id, "fix auth pages")
+        self.assertEqual(order, ["test", "publish"])
+
     def test_unfixed_instruction_is_not_published(self) -> None:
         user_id = uuid4()
         project_id = uuid4()

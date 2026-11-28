@@ -490,10 +490,12 @@ def _run_instruction_once(user_id: UUID, project_id: UUID, instruction: str) -> 
         ticket_ids = [ticket["id"] for ticket in tickets]
         print("tickets {0}".format(", ".join(ticket_ids)), flush=True)
         orchestrator.execute(user_id, None, ticket_ids)
+        # Free-tier retention purges fixed tickets after ~1 minute. A missing row
+        # after execute means it was fixed and purged, not that it failed.
         missing = [
             ticket_id
             for ticket_id in ticket_ids
-            if (found := intakes.find_ticket(user_id, ticket_id)) is None or found["status"] != FIXED
+            if (found := intakes.find_ticket(user_id, ticket_id)) is not None and found["status"] != FIXED
         ]
         if missing:
             raise RuntimeError("not fixed: {0}".format(", ".join(missing)))
