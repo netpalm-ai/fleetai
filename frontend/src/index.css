@@ -1,21 +1,23 @@
 :root {
-  --sidebar: #1b3139;
-  --sidebar-text: #f4f4f4;
-  --sidebar-muted: #9aa7ab;
-  --canvas: #f4f4f4;
-  --panel: #ffffff;
-  --line: #e0e0e0;
-  --text: #1b1b1b;
-  --muted: #5c5c5c;
-  --muted-2: #8a8a8a;
-  --coral: #FF3621;
-  --error: #9b1c1c;
-  --btn-ink: #ffffff;
+  --sidebar: #13100b;
+  --sidebar-text: #f5efe5;
+  --sidebar-muted: #aba08d;
+  --canvas: #0c0a07;
+  --panel: rgba(255, 255, 255, 0.045);
+  --field: #1a160f;
+  --line: #2b2418;
+  --text: #f5efe5;
+  --muted: #aba08d;
+  --muted-2: #74695a;
+  --accent: #eba85c;
+  --accent-strong: #e68a36;
+  --error: #ffb4a8;
+  --btn-ink: #1c0f02;
   --radius: 8px;
   --sidebar-width: 240px;
   --motion: 160ms ease;
   --body: "Hanken Grotesk", system-ui, sans-serif;
-  --display: var(--body);
+  --display: "Fraunces", Georgia, serif;
 }
 
 * {
@@ -37,6 +39,24 @@ body {
   font-size: 16px;
   line-height: 1.55;
   -webkit-font-smoothing: antialiased;
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  top: -28vh;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 120vw;
+  height: 82vh;
+  z-index: 0;
+  pointer-events: none;
+  background: radial-gradient(ellipse at center, rgba(255, 255, 255, 0.05) 0%, rgba(230, 138, 54, 0.1) 25%, transparent 68%);
+}
+
+#root {
+  position: relative;
+  z-index: 1;
 }
 
 a {
@@ -62,7 +82,7 @@ h3 {
 }
 
 .brand span {
-  color: inherit;
+  color: var(--accent);
 }
 
 .eyebrow {
@@ -98,14 +118,14 @@ h3 {
 }
 
 .btn-primary {
-  background: var(--coral);
+  background: var(--accent);
   color: var(--btn-ink);
-  border-color: var(--coral);
+  border-color: var(--accent);
 }
 
 .btn-primary:hover {
-  background: #e02f1c;
-  border-color: #e02f1c;
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
 }
 
 .btn-ghost {
@@ -183,7 +203,7 @@ textarea:focus-visible {
 
 .app-nav-link.on {
   color: var(--btn-ink);
-  background: var(--coral);
+  background: var(--accent);
 }
 
 .app-sidebar-account {
@@ -266,7 +286,8 @@ textarea:focus-visible {
   min-height: 56px;
   padding: 0 28px;
   border-bottom: 1px solid var(--line);
-  background: var(--panel);
+  background: rgba(12, 10, 7, 0.82);
+  backdrop-filter: blur(16px);
 }
 
 .app-title {
@@ -442,8 +463,7 @@ textarea:focus-visible {
 }
 
 .tickets li:hover {
-  border-color: #cfcfcf;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  border-color: rgba(235, 168, 92, 0.3);
 }
 
 .tickets .id {
@@ -544,7 +564,7 @@ textarea:focus-visible {
 
 .field input:not([type="file"]),
 .field select {
-  background: var(--panel);
+  background: var(--field);
   border: 1px solid var(--line);
   border-radius: var(--radius);
   color: var(--text);
@@ -558,7 +578,7 @@ textarea:focus-visible {
 }
 
 .field textarea {
-  background: var(--panel);
+  background: var(--field);
   border: 1px solid var(--line);
   border-radius: var(--radius);
   color: var(--text);
@@ -697,8 +717,8 @@ textarea:focus-visible {
 
 .ticket-row.is-verifying,
 .ticket-row.is-active {
-  border-color: #cfcfcf;
-  background: #fafafa;
+  border-color: rgba(235, 168, 92, 0.3);
+  background: rgba(230, 138, 54, 0.08);
 }
 
 .ticket-row.is-verifying .status {
@@ -745,9 +765,9 @@ textarea:focus-visible {
 }
 
 .accept input:checked {
-  background: var(--text);
-  border-color: var(--text);
-  box-shadow: inset 0 0 0 2px var(--panel);
+  background: var(--accent);
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 2px var(--canvas);
 }
 
 .accept a {

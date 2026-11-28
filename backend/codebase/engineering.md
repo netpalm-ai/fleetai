@@ -2,13 +2,6 @@
 
 These rules apply to every product. CODE CONTEXT may tighten them. It may not relax them.
 
-## Change
-
-- Solve only the requested problem.
-- Edit existing code. Do not add files, helpers, wrappers, or dependencies unless the ticket cannot be solved otherwise.
-- No TODOs, placeholders, commented-out code, unused imports, invented APIs, or invented business rules.
-- Do not change CI, deploy, auth, secrets, schema, or model settings unless the ticket and the operator both named that work.
-
 ## Database
 
 - Do not delete a database record.

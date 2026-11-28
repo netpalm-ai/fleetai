@@ -32,6 +32,7 @@ from config import (
     last_verdict,
     normalize_ticket,
     agent_context,
+    dev_rules,
     engineering_standard,
     ensure_code_context,
     product_areas,
@@ -154,6 +155,8 @@ class TechTicketTests(unittest.TestCase):
         self.assertNotIn("run-1", prompt)
         self.assertIn("Do not invent requirements", prompt)
         self.assertIn("Follow ENGINEERING STANDARD", prompt)
+        self.assertIn("Follow PREVENT", prompt)
+        self.assertIn("Follow DEV RULES", prompt)
         self.assertIn("Investigate before you edit", prompt)
         self.assertIn("every repo the diff touches", prompt)
         self.assertIn("adjacent consumers CODE CONTEXT names", prompt)
@@ -176,7 +179,10 @@ class TechTicketTests(unittest.TestCase):
 class EngineeringIngestTests(unittest.TestCase):
     def test_standard_is_generic_and_loaded_before_the_adapter(self) -> None:
         skill = engineering_standard()
-        self.assertIn("Edit existing code", skill)
+        rules = dev_rules()
+        self.assertIn("fewest lines", rules)
+        self.assertIn("Edit existing code", rules)
+        self.assertIn("Reuse existing functions", rules)
         self.assertIn("renders stamped fields", skill)
         self.assertIn("inspect FLEETAI_PRODUCT_ROOT", skill)
         self.assertIn("already dirty", skill)
@@ -188,9 +194,12 @@ class EngineeringIngestTests(unittest.TestCase):
         self.assertIn("Do not switch branch, stash, commit, push, rebase, discard, or deploy", skill)
         for banned in ("jmd-", "SNOMED", "Xycare", "FHIR", "409137002", "staging-uk-jmd"):
             self.assertNotIn(banned, skill)
+            self.assertNotIn(banned, rules)
         packed = agent_context("# Product\n\n## Repositories\n\n| app | . | local | demo |\n")
         self.assertLess(packed.find("ENGINEERING STANDARD"), packed.find("CODE CONTEXT"))
-        self.assertLess(packed.find("Edit existing code"), packed.find("## Repositories"))
+        self.assertLess(packed.find("CODE CONTEXT"), packed.find("DEV RULES"))
+        self.assertLess(packed.find("DEV RULES"), packed.find("Edit existing code"))
+        self.assertIn("read the tests that already cover that behavior", packed)
         sent = solver.ticket_prompt(_ticket("T1", UNRESOLVED), packed)
         self.assertIn("Edit existing code", sent)
         self.assertIn("## Repositories", sent)
@@ -217,11 +226,10 @@ class VerifierPromptTests(unittest.TestCase):
         ticket = _ticket("T1", VERIFYING)
         prompt = verifier.verify_prompt(ticket, "map")
         self.assertNotIn("Do not implement", prompt)
+        self.assertIn("Follow DEV RULES", prompt)
         self.assertIn("If the change introduced a bug, fix that bug and re-check", prompt)
         self.assertIn("every repo the solver diff touches", prompt)
         self.assertIn("tests that pass only because a CI service is missing", prompt)
-        self.assertIn("Also refine the solver diff", prompt)
-        self.assertIn("reuse existing functions", prompt)
         self.assertIn("Other than that, you must fix", prompt)
         self.assertIn("Do not mark it resolved while a new bug or that extra complexity is still in the tree", prompt)
         self.assertIn("VERDICT: fixed", prompt)

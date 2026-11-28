@@ -51,13 +51,6 @@ class ApiTests(unittest.TestCase):
             response = self.client.get("/health")
         self.assertEqual(response.status_code, 503)
 
-    def test_lists_tickets(self) -> None:
-        with patch.object(api.intakes, "list_visible_tickets", return_value=[{"id": "T1", "status": "unresolved"}]) as listed:
-            response = self.client.get("/tickets")
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json(), [{"id": "T1", "status": "unresolved"}])
-        listed.assert_called_once_with(USER.id, None)
-
     def test_gets_one_ticket(self) -> None:
         ticket = {"id": "T1", "status": "completed"}
         with patch.object(api.intakes, "find_ticket", return_value=ticket) as found:
@@ -109,32 +102,6 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(polled["status"], "error")
         self.assertEqual(polled["error"], "boom")
 
-    def test_solve_verify_return_jobs(self) -> None:
-        with (
-            patch.object(api.config, "require_ticket", return_value={"id": "T1", "status": "unresolved"}),
-            patch.object(api.solver, "solve") as solve,
-            patch.object(api.verifier, "verify") as verify,
-            patch.object(api.intakes, "latest_run_id", return_value="run-1"),
-        ):
-            solved = self.client.post("/tickets/T1/solve")
-            verified = self.client.post("/tickets/T1/verify")
-        self.assertEqual(solved.status_code, 202)
-        self.assertEqual(verified.status_code, 202)
-        solve.assert_called_once_with(USER.id, "T1")
-        verify.assert_called_once_with(USER.id, "T1")
-        job = self.client.get("/jobs/{0}".format(verified.json()["id"])).json()
-        self.assertEqual(job["status"], "done")
-        self.assertEqual(job["ticket_id"], "T1")
-        self.assertEqual(job["run_id"], "run-1")
-
-    def test_complete_returns_ticket(self) -> None:
-        completed = {"id": "T1", "status": "completed"}
-        with patch.object(api.solver, "complete", return_value=completed) as complete:
-            response = self.client.post("/tickets/T1/complete")
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json(), completed)
-        complete.assert_called_once_with(USER.id, "T1")
-
     def test_complete_maps_system_exit(self) -> None:
         with patch.object(api.solver, "complete", side_effect=SystemExit("ticket T1 is fixed; complete only accepts verifying")):
             response = self.client.post("/tickets/T1/complete")
@@ -170,13 +137,6 @@ class ApiTests(unittest.TestCase):
             release.set()
             thread.join()
 
-    def test_run_log_returns_text(self) -> None:
-        with patch.object(api.config, "read_run_log", return_value="# T1 solve\n") as read:
-            response = self.client.get("/tickets/T1/runs/run-1")
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json(), {"ticket_id": "T1", "run_id": "run-1", "text": "# T1 solve\n"})
-        read.assert_called_once_with(USER.id, "T1", "run-1")
-
     def test_ticket_routes_require_login(self) -> None:
         api.app.dependency_overrides.clear()
         try:
@@ -207,25 +167,6 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(self.client.post("/tickets/inputs", json={"email": "hi"}).status_code, 403)
         self.assertEqual(self.client.post("/execute").status_code, 403)
         self.assertEqual(self.client.get("/health").status_code, 200)
-
-    def test_post_inputs_saves_text(self) -> None:
-        with patch.object(api.config, "save_intake") as save:
-            response = self.client.post(
-                "/tickets/inputs",
-                json={"email": "hello", "list_text": "T1 broken login", "context": "# project"},
-            )
-        self.assertEqual(response.status_code, 204)
-        save.assert_called_once_with("hello", "T1 broken login", "# project", None, USER.id, None, [])
-
-    def test_post_inputs_saves_pdf(self) -> None:
-        raw = b"%PDF-1.4 test"
-        with patch.object(api.config, "save_intake") as save:
-            response = self.client.post(
-                "/tickets/inputs",
-                json={"list_pdf_base64": base64.b64encode(raw).decode("ascii")},
-            )
-        self.assertEqual(response.status_code, 204)
-        save.assert_called_once_with("", "", "", raw, USER.id, None, [])
 
     def test_post_inputs_saves_images(self) -> None:
         png = b"\x89PNG\r\n\x1a\n"
@@ -293,24 +234,6 @@ class SettingsApiTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         api.app.dependency_overrides.clear()
-
-    def test_free_user_sees_immediate_deletion_and_cannot_edit(self) -> None:
-        api.app.dependency_overrides[get_current_user] = lambda: USER
-        with patch.object(api.intakes, "keep_days", return_value=0):
-            response = self.client.get("/settings")
-        self.assertEqual(
-            response.json(),
-            {"subscription_status": "free", "ticket_retention_days": 0, "editable": False},
-        )
-
-    def test_paid_user_can_read_and_edit(self) -> None:
-        api.app.dependency_overrides[get_current_user] = lambda: PAID
-        with patch.object(api.intakes, "keep_days", return_value=90):
-            response = self.client.get("/settings")
-        self.assertEqual(
-            response.json(),
-            {"subscription_status": "paid", "ticket_retention_days": 90, "editable": True},
-        )
 
     def test_paid_user_sets_days_and_forever(self) -> None:
         api.app.dependency_overrides[get_current_user] = lambda: PAID

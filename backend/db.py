@@ -125,6 +125,45 @@ def get_pool() -> ConnectionPool:
     return pool
 
 
+def remember(kind: str, body: str) -> None:
+    text = body.strip()
+    if not text or kind not in ("rule", "feedback"):
+        return
+    if len(text) > 2000:
+        text = text[:2000].rstrip()
+    with get_pool().connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO memories (kind, body)
+            SELECT %s, %s
+            WHERE NOT EXISTS (
+                SELECT 1 FROM memories WHERE kind = %s AND body = %s
+            )
+            """,
+            (kind, text, kind, text),
+        )
+        conn.commit()
+
+
+def prevent_lines() -> str:
+    if pool is None:
+        return "(none)"
+    with get_pool().connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT body
+            FROM memories
+            WHERE kind IN ('rule', 'feedback')
+            ORDER BY CASE kind WHEN 'rule' THEN 0 ELSE 1 END, created_at DESC
+            LIMIT 40
+            """
+        ).fetchall()
+    lines = [str(row["body"]).strip() for row in rows if str(row["body"]).strip()]
+    if not lines:
+        return "(none)"
+    return "\n".join("- " + line for line in lines)
+
+
 def migrate(conn) -> None:
     with psycopg.ClientCursor(conn) as cur:
         for path in sorted(MIGRATIONS.glob("*.sql")):

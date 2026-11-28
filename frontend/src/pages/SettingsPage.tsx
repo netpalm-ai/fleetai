@@ -160,9 +160,7 @@ export function SettingsPage() {
             {github == null ? (
               <p className="muted">{githubLoadFailed ? "Could not load connectors." : "Loading connectors…"}</p>
             ) : !github.connected ? (
-              <>
-                <p className="muted">Connect GitHub so FleetAI can use the repositories you choose.</p>
-                <button
+              <button
                   className="btn btn-primary btn-block with-icon"
                   type="button"
                   onClick={() => {
@@ -176,7 +174,6 @@ export function SettingsPage() {
                   <GithubMark />
                   Connect GitHub
                 </button>
-              </>
             ) : (
               <>
                 <p className="muted with-icon">

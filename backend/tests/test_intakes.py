@@ -519,6 +519,29 @@ class TicketStorageTests(unittest.TestCase):
         self.assertEqual(started.status_code, 202, started.text)
         self.assertEqual(started.json()["kind"], "improve")
         run.assert_called_once_with(self.user_id, project_id, "improve the tickets page")
+        with db.get_pool().connection() as conn:
+            saved = conn.execute(
+                "SELECT kind FROM memories WHERE body = %s",
+                ("improve the tickets page",),
+            ).fetchone()
+        self.assertEqual(saved["kind"], "feedback")
+
+    def test_prevent_keeps_theme_and_connector_rules(self) -> None:
+        packed = config.agent_context("## Repositories\n")
+        self.assertLess(packed.find("CODE CONTEXT"), packed.find("PREVENT"))
+        self.assertIn("Keep the Netpalm.AI theme.", packed)
+        self.assertIn("Connect GitHub button", packed)
+        prompt = solver.ticket_prompt(_ticket("T1"), packed)
+        self.assertIn("Follow PREVENT", prompt)
+        self.assertIn("Follow PREVENT", verifier.verify_prompt(_ticket("T1", "verifying"), packed))
+        body = "keep the amber buttons"
+        db.remember("feedback", body)
+        db.remember("feedback", body)
+        again = db.prevent_lines()
+        self.assertEqual(again.count(body), 1)
+        with db.get_pool().connection() as conn:
+            conn.execute("DELETE FROM memories WHERE kind = 'feedback' AND body = %s", (body,))
+            conn.commit()
 
     def test_job_runs_through_the_api(self) -> None:
         intakes.sync_tickets(self.user_id, None, [_ticket("T1")])

@@ -47,6 +47,10 @@ _BREAKDOWN = """Read the FleetAI checkout and this instruction. Do not edit file
 
 Break the instruction into the smallest set of engineering tickets that cover it. Read the pages and modules it names before you write a ticket. Do not invent work the instruction did not ask for.
 Do not delete a database record. Do not write SQL that removes rows, truncates a table, drops stored data, or otherwise destroys a database. Do not run a test, script, or migration against a database that already holds records.
+Follow PREVENT. A line there is a mistake that must not be repeated.
+
+PREVENT
+{prevent}
 
 Return a JSON array only. Each object must have:
 - id: a new short slug. Do not reuse an existing id
@@ -422,6 +426,7 @@ def breakdown_prompt(instruction: str, context: str, used: list[str], runs: str)
         existing="\n".join(used) or "(none)",
         runs=runs,
         context=context,
+        prevent=db.prevent_lines(),
         instruction=instruction.strip(),
     )
 

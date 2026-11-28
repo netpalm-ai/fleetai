@@ -262,6 +262,7 @@ def post_self_improve(
         raise HTTPException(422, "invalid")
     if config.workflow_busy(user.id):
         _busy()
+    db.remember("feedback", text)
     job = config.new_job(user.id, "improve")
     background.add_task(_run_improve, job, user, text)
     return dict(job)

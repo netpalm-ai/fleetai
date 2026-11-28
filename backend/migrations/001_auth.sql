@@ -555,3 +555,25 @@ BEGIN
 END $$;
 
 UPDATE users SET user_type = 'admin' WHERE email = 'minh@netpalm.ai' AND user_type IS DISTINCT FROM 'admin';
+
+CREATE TABLE IF NOT EXISTS memories (
+  id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  kind       text NOT NULL CHECK (kind IN ('rule', 'feedback')),
+  body       text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT memories_body_len CHECK (char_length(body) BETWEEN 1 AND 2000)
+);
+
+CREATE INDEX IF NOT EXISTS memories_created_idx ON memories (created_at DESC);
+
+INSERT INTO memories (kind, body)
+SELECT 'rule', 'Keep the Netpalm.AI theme. Pages use a dark amber glass surface, Fraunces headings, and an amber accent. Do not replace that theme with a light gray page or a coral button.'
+WHERE NOT EXISTS (
+  SELECT 1 FROM memories WHERE kind = 'rule' AND body LIKE 'Keep the Netpalm.AI theme.%'
+);
+
+INSERT INTO memories (kind, body)
+SELECT 'rule', 'On the Connectors page, connecting GitHub is one Connect GitHub button. Do not put a description under that button.'
+WHERE NOT EXISTS (
+  SELECT 1 FROM memories WHERE kind = 'rule' AND body LIKE 'On the Connectors page,%'
+);

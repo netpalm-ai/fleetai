@@ -51,6 +51,7 @@ INTAKE_TEXT_MAX = 512 * 1024
 INTAKE_IMAGE_MAX = 5 * 1024 * 1024
 INTAKE_IMAGE_MAX_COUNT = 8
 ENGINEERING_PATH = ROOT / "codebase" / "engineering.md"
+DEV_RULES_PATH = ROOT / "codebase" / "dev_rules.md"
 MAP_PROMPT = """
 This project has no code context. Inspect only this checkout and write `.fleetai/code-context.md`.
 Do not edit any other file. Do not commit, push, or deploy. Do not copy rules from a product that is not in this tree.
@@ -346,8 +347,16 @@ def engineering_standard() -> str:
     return _read_required(ENGINEERING_PATH, "engineering standard")
 
 
+def dev_rules() -> str:
+    return _read_required(DEV_RULES_PATH, "dev rules")
+
+
 def agent_context(code: str) -> str:
-    return "ENGINEERING STANDARD\n{0}\n\nCODE CONTEXT\n{1}".format(engineering_standard(), code)
+    import db
+
+    return "ENGINEERING STANDARD\n{0}\n\nCODE CONTEXT\n{1}\n\nPREVENT\n{2}\n\nDEV RULES\n{3}".format(
+        engineering_standard(), code, db.prevent_lines(), dev_rules()
+    )
 
 
 def product_areas(text: str) -> str:
