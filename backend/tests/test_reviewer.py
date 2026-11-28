@@ -1,4 +1,4 @@
-"""Page-by-page and script-by-script reviewer for self-improve."""
+"""Page reviews, batched script review, and plan tickets."""
 
 from __future__ import annotations
 
@@ -36,7 +36,7 @@ class ReviewerTests(unittest.TestCase):
         self.assertEqual(calls["n"], len(reviewer.PAGES))
         self.assertEqual([item["path"] for item in findings], [page["route"] for page in reviewer.PAGES])
 
-    def test_list_and_audit_scripts(self) -> None:
+    def test_list_and_audit_scripts_in_one_batch(self) -> None:
         with TemporaryDirectory() as raw:
             clone = Path(raw)
             (clone / "frontend" / "src" / "pages").mkdir(parents=True)
@@ -56,18 +56,20 @@ class ReviewerTests(unittest.TestCase):
                     "frontend/src/pages/HomePage.tsx",
                 ],
             )
-            seen: list[str] = []
 
             def ask(prompt: str) -> str:
-                path = [item for item in scripts if item in prompt][0]
-                seen.append(path)
-                return json.dumps({"kind": "script", "path": path, "ok": True})
+                self.assertIn("every FleetAI product script in one pass", prompt)
+                for path in scripts:
+                    self.assertIn(path, prompt)
+                return json.dumps(
+                    [{"kind": "script", "path": path, "ok": True} for path in scripts]
+                )
 
             with patch.object(reviewer, "_ask", side_effect=ask), patch.object(
                 reviewer.db, "prevent_lines", return_value="(none)"
             ):
                 findings = reviewer.audit_scripts(clone, "improve scripts")
-        self.assertEqual(seen, scripts)
+        self.assertEqual([item["path"] for item in findings], scripts)
         self.assertTrue(all(item["ok"] for item in findings))
 
     def test_review_to_tickets_runs_pages_then_scripts(self) -> None:
@@ -91,15 +93,22 @@ class ReviewerTests(unittest.TestCase):
             text = reviewer.review_to_tickets(Path("/tmp"), "harden api", "CTX", [])
         self.assertEqual(order, ["pages", "scripts"])
         self.assertIn("csrf", text)
-        self.assertEqual(plan.call_args.args[0][1]["path"], "backend/api.py")
+        self.assertEqual(plan.call_args.kwargs.get("clone"), Path("/tmp"))
 
     def test_plan_tickets_asks_with_findings(self) -> None:
         findings = [{"kind": "page", "path": "/signup", "ok": False, "problems": ["sidebar"], "fix": "drop shell"}]
-        with patch.object(
-            reviewer,
-            "_ask",
-            return_value='[{"id":"fix-signup","title":"Signup","severity":"high","services":[],"context":"AppShell","expected":"no sidebar"}]',
-        ) as ask:
-            text = reviewer.plan_tickets(findings, "fix signup", "CODE", ["T1"])
+        with TemporaryDirectory() as raw:
+            clone = Path(raw)
+            (clone / "frontend").mkdir()
+            (clone / "frontend" / "AGENTS.md").write_text("signed-in sidebar only\n", encoding="utf-8")
+            with patch.object(
+                reviewer,
+                "_ask",
+                return_value='[{"id":"fix-signup","title":"Signup","severity":"high","services":[],"context":"AppShell","expected":"no sidebar"}]',
+            ) as ask, patch.object(reviewer.db, "prevent_lines", return_value="(none)"):
+                text = reviewer.plan_tickets(findings, "fix signup", "CODE", ["T1"], clone=clone)
         self.assertIn("fix-signup", text)
-        self.assertIn("/signup", ask.call_args.args[0])
+        prompt = ask.call_args.args[0]
+        self.assertIn("/signup", prompt)
+        self.assertIn("signed-in sidebar only", prompt)
+        self.assertIn("PRODUCT MAP", prompt)

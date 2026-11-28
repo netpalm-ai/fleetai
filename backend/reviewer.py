@@ -1,4 +1,4 @@
-"""Page-by-page and script-by-script review for self-improve, then tickets."""
+"""Page reviews, one batched script review, then a plan that tickets the gaps."""
 
 from __future__ import annotations
 
@@ -8,7 +8,8 @@ from pathlib import Path
 import db
 
 _MAX = 4000
-_SCRIPT_CHARS = 12000
+_SCRIPT_CHARS = 8000
+_BATCH_CHARS = 100_000
 
 # Product surfaces a human would click through, in order.
 PAGES = (
@@ -109,35 +110,42 @@ or
 {{"kind":"page","path":"{route}","ok":false,"problems":["..."],"fix":"one concrete fix for this page"}}
 """
 
-_SCRIPT = """You are reviewing one FleetAI script like a staff engineer before deciding what to improve.
-This is script {index}/{total}: {path}
-Read the file below. Follow PREVENT and, for frontend files, frontend/AGENTS.md / DEV RULES.
-Do not edit files. Do not commit, push, or deploy.
+_SCRIPTS = """You are reviewing every FleetAI product script in one pass, like a staff engineer who has the whole tree open.
+Follow PREVENT and frontend/AGENTS.md. Do not edit files. Do not commit, push, or deploy.
 
-Judge this script alone: correctness, security, dead/duplicated code, wrong layer, product naming,
-and whether it should change for the operator instruction. Prefer concrete problems. Do not invent
-features. If the script is fine, say ok.
+Judge across scripts: correctness, security, dead/duplicated code, wrong layer, product naming, and whether a script should change for the operator instruction.
+Prefer concrete problems. Do not invent features. Mark a script ok when it is fine.
+You must return one JSON object per listed script path.
 
 PREVENT
 {prevent}
 
-OPERATOR INSTRUCTION (context for what they care about)
+OPERATOR INSTRUCTION
 {instruction}
 
-FILE
-{path}
-{body}
+SCRIPTS ({count})
+{bodies}
 
-Return JSON only:
-{{"kind":"script","path":"{path}","ok":true}}
+Return a JSON array only. Each object:
+{{"kind":"script","path":"<exact path>","ok":true}}
 or
-{{"kind":"script","path":"{path}","ok":false,"problems":["..."],"fix":"one concrete fix for this script"}}
+{{"kind":"script","path":"<exact path>","ok":false,"problems":["..."],"fix":"one concrete fix"}}
 """
 
-_PLAN = """You finished a FleetAI walkthrough: every product page, then every product script.
-Decide which findings deserve work. Do not edit files. Do not commit, push, or deploy. Follow PREVENT.
+_PLAN = """You finished a FleetAI walkthrough: every product page (one at a time), then every product script (one batch).
+You now plan the work with full product context. Do not edit files. Do not commit, push, or deploy. Follow PREVENT.
 
-Findings (JSON array; kind is page or script):
+PRODUCT MAP
+Pages: {pages}
+Scripts: {scripts}
+
+FRONTEND AGENTS
+{agents}
+
+PREVENT
+{prevent}
+
+PAGE AND SCRIPT FINDINGS (JSON)
 {findings}
 
 OPERATOR INSTRUCTION
@@ -150,8 +158,8 @@ EXISTING IDS
 {existing}
 
 Rules:
-- Only ticket scripts/pages that are not ok. Prefer the operator instruction, but always ticket clear
-  PREVENT, AGENTS.md, or security violations even if the operator did not name them.
+- Use the findings plus the product map and AGENTS/PREVENT. Prefer the operator instruction, but always ticket clear PREVENT, AGENTS.md, or security violations even if the operator did not name them.
+- Only ticket items that are not ok, unless a cross-cutting gap is obvious from the map + findings together.
 - Smallest set of tickets. Do not invent work the findings do not support.
 - Name the files to edit in context.
 
@@ -190,6 +198,20 @@ def _json_object(text: str) -> dict:
     data = json.loads(body[start : end + 1])
     if not isinstance(data, dict):
         raise RuntimeError("review was not a JSON object")
+    return data
+
+
+def _json_array(text: str) -> list:
+    body = (text or "").strip()
+    if body.startswith("```"):
+        body = body.split("\n", 1)[1].removesuffix("```").strip()
+    start = body.find("[")
+    end = body.rfind("]")
+    if start < 0 or end < start:
+        raise RuntimeError("review was not a JSON array")
+    data = json.loads(body[start : end + 1])
+    if not isinstance(data, list):
+        raise RuntimeError("review was not a JSON array")
     return data
 
 
@@ -233,8 +255,32 @@ def list_scripts(clone: Path) -> list[str]:
                 relative = path.relative_to(clone).as_posix()
                 if not _skip_script(relative):
                     found.append(relative)
-    # stable unique
     return sorted(set(found))
+
+
+def _agents_text(clone: Path) -> str:
+    path = clone / "frontend" / "AGENTS.md"
+    if not path.is_file():
+        return "(missing frontend/AGENTS.md)"
+    text = path.read_text(encoding="utf-8")
+    return text if len(text) <= 12000 else text[:12000] + "\n..."
+
+
+def _script_batch(clone: Path, scripts: list[str]) -> str:
+    chunks: list[str] = []
+    used = 0
+    for relative in scripts:
+        path = clone / relative
+        body = path.read_text(encoding="utf-8") if path.is_file() else "(missing)"
+        if len(body) > _SCRIPT_CHARS:
+            body = body[:_SCRIPT_CHARS] + "\n..."
+        piece = "### {0}\n{1}".format(relative, body)
+        if used + len(piece) > _BATCH_CHARS and chunks:
+            chunks.append("### {0}\n(truncated for length; still judge from path + neighbors)".format(relative))
+            continue
+        chunks.append(piece)
+        used += len(piece)
+    return "\n\n".join(chunks)
 
 
 def audit_pages(clone: Path, instruction: str) -> list[dict]:
@@ -275,49 +321,75 @@ def audit_pages(clone: Path, instruction: str) -> list[dict]:
 
 
 def audit_scripts(clone: Path, instruction: str) -> list[dict]:
-    prevent = db.prevent_lines()
-    scoped = _clip(instruction)
     scripts = list_scripts(clone)
-    findings: list[dict] = []
-    total = len(scripts)
-    for index, relative in enumerate(scripts, start=1):
-        print("review script {0}".format(relative), flush=True)
-        path = clone / relative
-        body = path.read_text(encoding="utf-8") if path.is_file() else "(missing)"
-        if len(body) > _SCRIPT_CHARS:
-            body = body[:_SCRIPT_CHARS] + "\n..."
-        answer = _ask(
-            _SCRIPT.format(
-                index=index,
-                total=total,
-                path=relative,
-                prevent=prevent,
-                instruction=scoped,
-                body=body,
-            )
+    if not scripts:
+        return []
+    print("review scripts batch {0}".format(len(scripts)), flush=True)
+    answer = _ask(
+        _SCRIPTS.format(
+            prevent=db.prevent_lines(),
+            instruction=_clip(instruction),
+            count=len(scripts),
+            bodies=_script_batch(clone, scripts),
         )
-        try:
-            item = _json_object(answer)
-        except (RuntimeError, json.JSONDecodeError):
+    )
+    try:
+        rows = _json_array(answer)
+    except (RuntimeError, json.JSONDecodeError):
+        return [
+            {
+                "kind": "script",
+                "path": path,
+                "ok": False,
+                "problems": ["script batch review did not return JSON"],
+                "fix": "Re-review {0} and fix concrete issues.".format(path),
+            }
+            for path in scripts
+        ]
+    by_path = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        path = str(row.get("path") or "").strip()
+        if not path:
+            continue
+        row["kind"] = "script"
+        row["path"] = path
+        by_path[path] = row
+    findings: list[dict] = []
+    for path in scripts:
+        item = by_path.get(path)
+        if item is None:
             findings.append(
                 {
                     "kind": "script",
-                    "path": relative,
+                    "path": path,
                     "ok": False,
-                    "problems": ["script review did not return JSON"],
-                    "fix": "Re-review {0} and fix concrete issues.".format(relative),
+                    "problems": ["script missing from batch review"],
+                    "fix": "Re-review {0}.".format(path),
                 }
             )
             continue
-        item["kind"] = "script"
-        item["path"] = relative
         findings.append(item)
     return findings
 
 
-def plan_tickets(findings: list[dict], instruction: str, context: str, existing: list[str]) -> str:
+def plan_tickets(
+    findings: list[dict],
+    instruction: str,
+    context: str,
+    existing: list[str],
+    *,
+    clone: Path | None = None,
+) -> str:
+    scripts = list_scripts(clone) if clone is not None else []
+    pages = ", ".join(page["route"] for page in PAGES)
     return _ask(
         _PLAN.format(
+            pages=pages,
+            scripts=", ".join(scripts) or "(none)",
+            agents=_agents_text(clone) if clone is not None else "(no checkout)",
+            prevent=db.prevent_lines(),
             findings=json.dumps(findings, indent=2)[:16000],
             instruction=_clip(instruction),
             context=_clip(context, 8000),
@@ -330,4 +402,4 @@ def review_to_tickets(clone: Path, instruction: str, context: str, existing: lis
     findings = audit_pages(clone, instruction)
     findings.extend(audit_scripts(clone, instruction))
     print("review findings {0}".format(len(findings)), flush=True)
-    return plan_tickets(findings, instruction, context, existing)
+    return plan_tickets(findings, instruction, context, existing, clone=clone)

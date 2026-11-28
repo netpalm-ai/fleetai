@@ -55,7 +55,7 @@ Never print passwords, reset tokens, authenticator codes, session cookies, or Gi
 
 - Read `fleetai/frontend/AGENTS.md` before a frontend change. Keep the amber glass tokens, `BrandMark`, and the existing button classes. Do not add a component library or a test runner.
 - Workspace, not Tickets: signed-in home is `/workspace`. Public routes (`/`, `/login`, `/signup`, `/verify`, `/forgot`, `/reset`, `/terms`) must not show the signed-in `AppShell` sidebar.
-- Self-improve (admin): `reviewer` walks product pages in order (`/`, `/login`, `/signup`, `/verify`, `/forgot`, `/reset`, `/terms`, `/workspace`, `/connectors`, `/settings`), then every product script under `frontend/src`, `backend/*.py`, and `backend/auth` (tests skipped), then emits tickets. Follow **PREVENT** and `AGENTS.md`.
+- Self-improve (admin): `reviewer` walks product pages one at a time (`/`, `/login`, `/signup`, `/verify`, `/forgot`, `/reset`, `/terms`, `/workspace`, `/connectors`, `/settings`), then reviews every product script under `frontend/src`, `backend/*.py`, and `backend/auth` in one batch (tests skipped), then `plan_tickets` uses all findings + AGENTS/PREVENT/product map to emit tickets.
 - `watcher` recovers from run failures without implementing the instruction; after a successful pass it re-walks pages and may emit a follow-up instruction.
 - Follow **PREVENT** in all agent prompts. A line there is a mistake that must not be repeated.
 - Do not change schema, auth, secrets, or CI unless the ticket names that work.
