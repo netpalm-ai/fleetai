@@ -189,14 +189,18 @@ class SelfLooperTests(unittest.TestCase):
         ):
             selflooper.publish(Path("/tmp/fleetai"), "review each FE page")
         self.assertEqual(
-            [args[0] for args in calls if args[0] in {"commit", "push", "merge", "checkout", "fetch"}],
-            ["commit", "push", "fetch", "checkout", "merge", "push", "checkout"],
+            [args[0] for args in calls if args[0] in {"config", "commit", "push", "merge", "checkout", "fetch"}],
+            ["config", "config", "commit", "push", "fetch", "checkout", "merge", "push", "checkout"],
         )
-        self.assertEqual(calls[4], ("push", "origin", "HEAD:fleetai/dev"))
-        self.assertEqual(calls[6], ("checkout", "-B", "main", "origin/main"))
-        self.assertEqual(calls[7], ("merge", "--no-edit", "fleetai/dev"))
-        self.assertEqual(calls[8], ("push", "origin", "HEAD:main"))
-        self.assertEqual(calls[9], ("checkout", "fleetai/dev"))
+        self.assertEqual(calls[2], ("config", "user.email", "fleetai@netpalm.ai"))
+        self.assertEqual(calls[3], ("config", "user.name", "FleetAI"))
+        self.assertEqual(calls[4], ("add", "-A"))
+        self.assertEqual(calls[5], ("commit", "-m", "fleetai: review each FE page"))
+        self.assertEqual(calls[6], ("push", "origin", "HEAD:fleetai/dev"))
+        self.assertEqual(calls[8], ("checkout", "-B", "main", "origin/main"))
+        self.assertEqual(calls[9], ("merge", "--no-edit", "fleetai/dev"))
+        self.assertEqual(calls[10], ("push", "origin", "HEAD:main"))
+        self.assertEqual(calls[11], ("checkout", "fleetai/dev"))
 
 
 @contextmanager
