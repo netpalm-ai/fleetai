@@ -460,8 +460,7 @@ export function TicketsPage() {
       <main className="shell shell-app">
         <div className="page-head">
           <div>
-            <p className="eyebrow">Workspace</p>
-            <h1>Resolve tickets</h1>
+            <h1>Workspace</h1>
           </div>
         </div>
         {error ? (

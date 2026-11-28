@@ -12,8 +12,8 @@ const NAV = [
 ] as const;
 
 function titleFor(pathname: string): string {
-  if (pathname === "/tickets") {
-    return "Tickets";
+  if (pathname === "/workspace") {
+    return "Workspace";
   }
   const item = NAV.find((entry) => entry.to === pathname);
   if (item) {
@@ -44,14 +44,14 @@ export function AppShell({ children }: { children: ReactNode }) {
   const { pathname } = useLocation();
   const [params] = useSearchParams();
   const [open, setOpen] = useState(false);
-  const [projectsOpen, setProjectsOpen] = useState(pathname === "/tickets");
+  const [projectsOpen, setProjectsOpen] = useState(pathname === "/workspace");
   const [projects, setProjects] = useState<Project[]>([]);
   const menu = useRef<HTMLDivElement>(null);
   const title = titleFor(pathname);
   const selectedProject = params.get("project");
 
   useEffect(() => {
-    if (pathname === "/tickets") {
+    if (pathname === "/workspace") {
       setProjectsOpen(true);
     }
   }, [pathname]);
@@ -103,7 +103,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   return (
     <div className="app-shell">
       <aside className="app-sidebar">
-        <Link to={username ? "/tickets" : "/"} className="app-sidebar-brand">
+        <Link to={username ? "/workspace" : "/"} className="app-sidebar-brand">
           <BrandMark />
         </Link>
         {username ? (
@@ -122,11 +122,11 @@ export function AppShell({ children }: { children: ReactNode }) {
               {projectsOpen ? (
                 <div className="app-nav-projects">
                   {projects.map((project) => {
-                    const selected = pathname === "/tickets" && selectedProject === project.id;
+                    const selected = pathname === "/workspace" && selectedProject === project.id;
                     return (
                       <Link
                         key={project.id}
-                        to={"/tickets?project=" + encodeURIComponent(project.id)}
+                        to={"/workspace?project=" + encodeURIComponent(project.id)}
                         className={selected ? "app-nav-link app-nav-project on" : "app-nav-link app-nav-project"}
                       >
                         <NavIcon name="box" />

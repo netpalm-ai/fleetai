@@ -34,12 +34,14 @@ only. No image logo.
 Terms (`/terms`) is a readable legal page with the site header, not a landing
 hero. Copy comes only from `src/data/termsOfService.ts`.
 
-After sign-in, `/tickets` is the intake studio: paste or PDF ticket list, email
+After sign-in, `/workspace` is the intake studio: paste or PDF ticket list, email
 textarea, optional project.md context, then **Resolve tickets**. That posts
 `/api/v1/tickets/inputs` then `/api/v1/execute`, polls `/api/v1/jobs/{id}`, and
 lists tickets from `GET /api/v1/tickets`. No marketing hero.
 
-Signed-in pages use a left sidebar (`AppShell`): Tickets, Connectors, Settings.
+Signed-in pages use a left sidebar (`AppShell`): Projects, Connectors, Settings.
+`/workspace` is the signed-in home. A project in the sidebar opens that project's tickets.
+`/tickets` redirects to `/workspace`.
 GitHub lives only under Connectors, never in the top bar. `/settings` is account
 settings (`GET/PUT /api/v1/settings`). `/connectors` is where a customer connects
 GitHub. Do not mention branches, clones, or server setup there.
@@ -70,12 +72,12 @@ authenticator code field after a `401 code required`.
 A `403` there means the email is not verified yet and a `429` means too many attempts; both get their own message.
 `username` is the handle; sign-in uses `email`.
 On load, `GET /api/v1/auth/me`. Non-GET fetches send `X-Requested-With: fleetai` and
-`credentials: 'same-origin'`. 401 on `/tickets` redirects to `/login`. Do not store
+`credentials: 'same-origin'`. 401 on `/workspace` redirects to `/login`. Do not store
 passwords or accounts in localStorage. `SessionProvider` signs the user out after
 `idle_limit_minutes` (from `/auth/me`) without input and shows `SessionExpired`, a
 blurred overlay with a Sign in button. A 401 from a page calls `expire()` to show the
 same dialog. Routes: `/` intro, `/login`, `/signup`,
-`/terms`, `/tickets`, `/connectors`, `/settings`.
+`/terms`, `/workspace`, `/connectors`, `/settings`. `/tickets` redirects to `/workspace`.
 
 ## Backend
 

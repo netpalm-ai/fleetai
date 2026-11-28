@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes, useSearchParams } from "react-router-dom";
 import { AppShell } from "./components/AppShell";
 import { ForgotPasswordPage } from "./pages/ForgotPasswordPage";
 import { HomePage } from "./pages/HomePage";
@@ -11,6 +11,23 @@ import { TermsPage } from "./pages/TermsPage";
 import { TicketsPage } from "./pages/TicketsPage";
 import { VerifyPage } from "./pages/VerifyPage";
 import { SessionProvider, useSession } from "./session";
+
+function Home() {
+  const { ready, username } = useSession();
+  if (!ready) {
+    return null;
+  }
+  if (username) {
+    return <Navigate to="/workspace" replace />;
+  }
+  return <HomePage />;
+}
+
+function LegacyTickets() {
+  const [params] = useSearchParams();
+  const query = params.toString();
+  return <Navigate to={query ? "/workspace?" + query : "/workspace"} replace />;
+}
 
 function RequireAuth({ children }: { children: ReactNode }) {
   const { ready, username } = useSession();
@@ -33,7 +50,7 @@ export default function App() {
       <BrowserRouter>
         <AppShell>
           <Routes>
-            <Route path="/" element={<HomePage />} />
+            <Route path="/" element={<Home />} />
             <Route path="/login" element={<LoginPage />} />
             <Route path="/signup" element={<SignUpPage />} />
             <Route path="/verify" element={<VerifyPage />} />
@@ -41,13 +58,14 @@ export default function App() {
             <Route path="/reset" element={<ResetPasswordPage />} />
             <Route path="/terms" element={<TermsPage />} />
             <Route
-              path="/tickets"
+              path="/workspace"
               element={
                 <RequireAuth>
                   <TicketsPage />
                 </RequireAuth>
               }
             />
+            <Route path="/tickets" element={<LegacyTickets />} />
             <Route
               path="/connectors"
               element={

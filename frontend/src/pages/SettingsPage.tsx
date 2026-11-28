@@ -135,7 +135,7 @@ export function SettingsPage() {
       <main className="shell shell-app">
         <div className="page-head">
           <div>
-            <p className="eyebrow">{connectors ? "Workspace" : "Account"}</p>
+            {connectors ? null : <p className="eyebrow">Account</p>}
             <h1>{connectors ? "Connectors" : "Settings"}</h1>
           </div>
         </div>

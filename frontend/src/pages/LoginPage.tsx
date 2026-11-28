@@ -35,7 +35,7 @@ export function LoginPage() {
     );
   }
   if (username) {
-    return <Navigate to="/tickets" replace />;
+    return <Navigate to="/workspace" replace />;
   }
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
