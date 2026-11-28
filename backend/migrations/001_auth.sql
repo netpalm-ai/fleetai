@@ -577,3 +577,9 @@ SELECT 'rule', 'On the Connectors page, connecting GitHub is one Connect GitHub 
 WHERE NOT EXISTS (
   SELECT 1 FROM memories WHERE kind = 'rule' AND body LIKE 'On the Connectors page,%'
 );
+
+INSERT INTO memories (kind, body)
+SELECT 'rule', 'The signed-in product home is Workspace at /workspace. Do not name a screen, route, or sidebar label Tickets, and do not add a /tickets page.'
+WHERE NOT EXISTS (
+  SELECT 1 FROM memories WHERE kind = 'rule' AND body LIKE 'The signed-in product home is Workspace%'
+);

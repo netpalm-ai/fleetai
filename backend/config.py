@@ -501,6 +501,8 @@ def push_ticket(ticket_id: str, report: str | None) -> None:
             ["git", "diff", "--cached", "--name-only"], cwd=cwd, check=True, capture_output=True, text=True
         ).stdout.splitlines()
         if staged:
+            connections.github.git(cwd, None, "config", "user.email", "fleetai@netpalm.ai")
+            connections.github.git(cwd, None, "config", "user.name", "FleetAI")
             connections.github.git(cwd, token, "commit", "-m", "fleetai: {0}".format(ticket_id))
         elif token is None:
             raise RuntimeError("nothing staged in {0} for ticket {1}".format(cwd.name, ticket_id))

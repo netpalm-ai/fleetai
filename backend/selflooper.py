@@ -259,6 +259,11 @@ def _commit_message(instruction: str) -> str:
     return "fleetai: {0}".format(line or "instruction")
 
 
+def _ensure_git_identity(clone: Path) -> None:
+    _git(clone, None, "config", "user.email", "fleetai@netpalm.ai")
+    _git(clone, None, "config", "user.name", "FleetAI")
+
+
 def publish(clone: Path, instruction: str) -> None:
     checkout = active_checkout()
     token = checkout.token if checkout else None
@@ -266,6 +271,7 @@ def publish(clone: Path, instruction: str) -> None:
     if branch != DEV_BRANCH:
         raise RuntimeError("checkout is {0}; required branch is {1}".format(branch, DEV_BRANCH))
     if _status(clone).strip():
+        _ensure_git_identity(clone)
         _git(clone, token, "add", "-A")
         _git(clone, token, "commit", "-m", _commit_message(instruction))
     print("pushing {0}".format(DEV_BRANCH), flush=True)
