@@ -112,6 +112,7 @@ class SelfLooperTests(unittest.TestCase):
                 patch.object(selflooper.intakes, "find_ticket", return_value={"id": "copy-home", "status": "fixed"}),
                 patch.object(selflooper, "run_tests", side_effect=tests),
                 patch.object(selflooper, "publish", side_effect=publish),
+                patch.object(selflooper.watcher, "review", return_value=None),
                 patch.object(selflooper.intakes, "set_ticket_status") as mark,
             ):
                 selflooper.run_instruction(user_id, project_id, "review each FE page for industrial standard")
@@ -150,11 +151,65 @@ class SelfLooperTests(unittest.TestCase):
                 patch.object(selflooper.orchestrator, "execute"),
                 patch.object(selflooper.intakes, "find_ticket", return_value={"id": "copy-home", "status": "unresolved"}),
                 patch.object(selflooper, "publish") as publish,
+                patch.object(selflooper.watcher, "recover", return_value=False),
             ):
                 with self.assertRaises(RuntimeError) as raised:
                     selflooper.run_instruction(user_id, project_id, "review the home page")
         self.assertIn("not fixed", str(raised.exception))
         publish.assert_not_called()
+
+    def test_watcher_recovers_then_retries(self) -> None:
+        user_id = uuid4()
+        project_id = uuid4()
+        calls = {"n": 0}
+
+        def once(owner, project, text):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise RuntimeError("FleetAI checkout is dirty")
+            return ["copy-home"]
+
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            (root / "fleetai" / ".git").mkdir(parents=True)
+            with (
+                patch.object(selflooper, "_run_instruction_once", side_effect=once),
+                patch.object(selflooper.connections.github, "checkout_for", lambda *args: _quiet()),
+                patch.object(selflooper, "product_cwd", return_value=root),
+                patch.object(selflooper.watcher, "recover", return_value=True) as recover,
+                patch.object(selflooper.watcher, "review", return_value=None),
+            ):
+                selflooper.run_instruction(user_id, project_id, "review the home page")
+        self.assertEqual(calls["n"], 2)
+        recover.assert_called_once()
+
+    def test_watcher_follow_up_runs_again(self) -> None:
+        user_id = uuid4()
+        project_id = uuid4()
+        seen: list[str] = []
+
+        def once(owner, project, text):
+            seen.append(text)
+            return ["copy-home"]
+
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            (root / "fleetai" / ".git").mkdir(parents=True)
+            with (
+                patch.object(selflooper, "_run_instruction_once", side_effect=once),
+                patch.object(selflooper.connections.github, "checkout_for", lambda *args: _quiet()),
+                patch.object(selflooper, "product_cwd", return_value=root),
+                patch.object(
+                    selflooper.watcher,
+                    "review",
+                    side_effect=["Fix the sidebar folders to match ChatGPT density", None],
+                ),
+            ):
+                selflooper.run_instruction(user_id, project_id, "match the ChatGPT sidebar")
+        self.assertEqual(
+            seen,
+            ["match the ChatGPT sidebar", "Fix the sidebar folders to match ChatGPT density"],
+        )
 
     def test_frontend_and_backend_commands(self) -> None:
         commands = selflooper.test_commands(

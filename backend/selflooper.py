@@ -19,6 +19,7 @@ import connections
 import db
 import intakes
 import orchestrator
+import watcher
 from config import (
     COMPLETED,
     FIXED,
@@ -33,6 +34,7 @@ from config import (
 DEV_BRANCH = "fleetai/dev"
 MAIN_BRANCH = "main"
 SSH_REMOTE = "git@github.com:netpalm-ai/fleetai.git"
+WATCH_ATTEMPTS = 3
 
 _REQUIRED = (
     "## Product",
@@ -457,7 +459,7 @@ def analyze(prompt: str) -> str:
     return result.result or ""
 
 
-def run_instruction(user_id: UUID, project_id: UUID, instruction: str) -> None:
+def _run_instruction_once(user_id: UUID, project_id: UUID, instruction: str) -> list[str]:
     context = ensure_code_context(user_id, project_id)
     require_context(context)
     with connections.github.checkout_for(user_id, project_id):
@@ -493,6 +495,31 @@ def run_instruction(user_id: UUID, project_id: UUID, instruction: str) -> None:
             raise
         finish_pushing_runs(_probe_health())
     close_fixed(user_id, ticket_ids)
+    return ticket_ids
+
+
+def run_instruction(user_id: UUID, project_id: UUID, instruction: str) -> None:
+    original = instruction.strip()
+    current = original
+    for attempt in range(WATCH_ATTEMPTS):
+        try:
+            _run_instruction_once(user_id, project_id, current)
+            with connections.github.checkout_for(user_id, project_id):
+                follow = watcher.review(product_cwd() / "fleetai", original, current)
+            if not follow:
+                return
+            print("watcher again: {0}".format(follow), flush=True)
+            current = follow
+        except RuntimeError as exc:
+            if attempt + 1 >= WATCH_ATTEMPTS:
+                raise
+            with connections.github.checkout_for(user_id, project_id):
+                clone = product_cwd() / "fleetai"
+                print("watcher recover: {0}".format(exc), flush=True)
+                if not watcher.recover(clone, current, str(exc)):
+                    raise
+            print("watcher recovered; retry {0}".format(attempt + 2), flush=True)
+    raise RuntimeError("watcher gave up after {0} attempts".format(WATCH_ATTEMPTS))
 
 
 def resolve_open(user_id: UUID, project_id: UUID) -> None:
