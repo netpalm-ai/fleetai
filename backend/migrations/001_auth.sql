@@ -583,3 +583,9 @@ SELECT 'rule', 'The signed-in product home is Workspace at /workspace. Do not na
 WHERE NOT EXISTS (
   SELECT 1 FROM memories WHERE kind = 'rule' AND body LIKE 'The signed-in product home is Workspace%'
 );
+
+INSERT INTO memories (kind, body)
+SELECT 'rule', 'The product sidebar is only for signed-in pages. Do not put AppShell sidebar chrome on /, /login, /signup, /forgot, /reset, /verify, or /terms.'
+WHERE NOT EXISTS (
+  SELECT 1 FROM memories WHERE kind = 'rule' AND body LIKE 'The product sidebar is only for signed-in pages.%'
+);

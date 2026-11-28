@@ -40,7 +40,7 @@ function titleFor(pathname: string): string {
 }
 
 export function AppShell({ children }: { children: ReactNode }) {
-  const { username, ready, signOut } = useSession();
+  const { username, signOut } = useSession();
   const { pathname } = useLocation();
   const [params] = useSearchParams();
   const [open, setOpen] = useState(false);
@@ -100,90 +100,84 @@ export function AppShell({ children }: { children: ReactNode }) {
     };
   }, [open]);
 
+  if (!username) {
+    return <>{children}</>;
+  }
+
   return (
     <div className="app-shell">
       <aside className="app-sidebar">
-        <Link to={username ? "/workspace" : "/"} className="app-sidebar-brand">
+        <Link to="/workspace" className="app-sidebar-brand">
           <BrandMark />
         </Link>
-        {username ? (
-          <nav className="app-sidebar-nav" aria-label="Main">
-            <div className="app-nav-group">
-              <button
-                className="app-nav-link"
-                type="button"
-                aria-expanded={projectsOpen}
-                onClick={() => setProjectsOpen((value) => !value)}
-              >
-                <NavIcon name="folder" />
-                <span className="app-nav-label">Projects</span>
-                <NavIcon name={projectsOpen ? "chevron-down" : "chevron"} />
-              </button>
-              {projectsOpen ? (
-                <div className="app-nav-projects">
-                  {projects.map((project) => {
-                    const selected = pathname === "/workspace" && selectedProject === project.id;
-                    return (
-                      <Link
-                        key={project.id}
-                        to={"/workspace?project=" + encodeURIComponent(project.id)}
-                        className={selected ? "app-nav-link app-nav-project on" : "app-nav-link app-nav-project"}
-                      >
-                        <NavIcon name="box" />
-                        <span className="app-nav-label">{project.product_name || project.name}</span>
-                      </Link>
-                    );
-                  })}
-                </div>
-              ) : null}
-            </div>
-            {NAV.map((item) => (
-              <NavLink
-                key={item.to}
-                to={item.to}
-                end={item.end}
-                className={({ isActive }) => (isActive ? "app-nav-link on" : "app-nav-link")}
-              >
-                <NavIcon name={item.icon} />
-                <span className="app-nav-label">{item.label}</span>
-              </NavLink>
-            ))}
-          </nav>
-        ) : null}
+        <nav className="app-sidebar-nav" aria-label="Main">
+          <div className="app-nav-group">
+            <button
+              className="app-nav-link"
+              type="button"
+              aria-expanded={projectsOpen}
+              onClick={() => setProjectsOpen((value) => !value)}
+            >
+              <NavIcon name="folder" />
+              <span className="app-nav-label">Projects</span>
+              <NavIcon name={projectsOpen ? "chevron-down" : "chevron"} />
+            </button>
+            {projectsOpen ? (
+              <div className="app-nav-projects">
+                {projects.map((project) => {
+                  const selected = pathname === "/workspace" && selectedProject === project.id;
+                  return (
+                    <Link
+                      key={project.id}
+                      to={"/workspace?project=" + encodeURIComponent(project.id)}
+                      className={selected ? "app-nav-link app-nav-project on" : "app-nav-link app-nav-project"}
+                    >
+                      <NavIcon name="box" />
+                      <span className="app-nav-label">{project.product_name || project.name}</span>
+                    </Link>
+                  );
+                })}
+              </div>
+            ) : null}
+          </div>
+          {NAV.map((item) => (
+            <NavLink
+              key={item.to}
+              to={item.to}
+              end={item.end}
+              className={({ isActive }) => (isActive ? "app-nav-link on" : "app-nav-link")}
+            >
+              <NavIcon name={item.icon} />
+              <span className="app-nav-label">{item.label}</span>
+            </NavLink>
+          ))}
+        </nav>
         <div className="app-sidebar-account" ref={menu}>
-          {username ? (
-            <>
+          <button
+            className="app-user-btn"
+            type="button"
+            aria-expanded={open}
+            aria-haspopup="menu"
+            onClick={() => setOpen((value) => !value)}
+          >
+            {username}
+          </button>
+          {open ? (
+            <div className="app-user-menu" role="menu">
+              <Link to="/settings" role="menuitem" onClick={() => setOpen(false)}>
+                Settings
+              </Link>
               <button
-                className="app-user-btn"
                 type="button"
-                aria-expanded={open}
-                aria-haspopup="menu"
-                onClick={() => setOpen((value) => !value)}
+                role="menuitem"
+                onClick={() => {
+                  setOpen(false);
+                  void signOut();
+                }}
               >
-                {username}
+                Sign out
               </button>
-              {open ? (
-                <div className="app-user-menu" role="menu">
-                  <Link to="/settings" role="menuitem" onClick={() => setOpen(false)}>
-                    Settings
-                  </Link>
-                  <button
-                    type="button"
-                    role="menuitem"
-                    onClick={() => {
-                      setOpen(false);
-                      void signOut();
-                    }}
-                  >
-                    Sign out
-                  </button>
-                </div>
-              ) : null}
-            </>
-          ) : ready ? (
-            <Link className="app-account-link" to="/login">
-              Sign in
-            </Link>
+            </div>
           ) : null}
         </div>
       </aside>

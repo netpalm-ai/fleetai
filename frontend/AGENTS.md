@@ -42,6 +42,8 @@ lists the work from `GET /api/v1/tickets`. No marketing hero. There is no
 `/tickets` page.
 
 Signed-in pages use a left sidebar (`AppShell`): Projects, Connectors, Settings.
+Public pages (`/`, `/login`, `/signup`, `/forgot`, `/reset`, `/verify`, `/terms`)
+must not show that sidebar — they keep their own auth/intro layout.
 `/workspace` is the signed-in home. A project in the sidebar opens that project.
 GitHub lives only under Connectors, never in the top bar. `/settings` is account
 settings (`GET/PUT /api/v1/settings`). `/connectors` is where a customer connects
