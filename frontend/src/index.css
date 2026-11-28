@@ -184,16 +184,58 @@ textarea:focus-visible {
   flex: 1;
 }
 
+.app-nav-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.app-nav-projects {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
 .app-nav-link {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
   padding: 10px 12px;
+  border: 0;
   border-radius: var(--radius);
+  background: transparent;
   color: var(--sidebar-muted);
+  font: inherit;
   font-size: 14px;
   font-weight: 500;
+  text-align: left;
+  cursor: pointer;
   transition:
     background var(--motion),
     color var(--motion);
+}
+
+.app-nav-icon {
+  width: 16px;
+  height: 16px;
+  flex: none;
+}
+
+.app-nav-link > .app-nav-icon:last-child {
+  margin-left: auto;
+}
+
+.app-nav-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-nav-project {
+  padding-left: 22px;
 }
 
 .app-nav-link:hover {
@@ -323,9 +365,8 @@ textarea:focus-visible {
   }
 
   .app-sidebar-nav {
-    flex-direction: row;
-    flex-wrap: wrap;
-    gap: 8px;
+    flex-direction: column;
+    gap: 4px;
     flex: none;
   }
 

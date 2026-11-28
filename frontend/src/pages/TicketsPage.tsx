@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type DragEvent } from "react";
+import { useSearchParams } from "react-router-dom";
 import { ApiError, getJson, request, requestError } from "../api/client";
 import { useSession } from "../session";
 import type { Job, Project, Ticket } from "../types";
@@ -83,6 +84,8 @@ function imageKind(file: File): "png" | "jpeg" | "webp" | null {
 
 export function TicketsPage() {
   const { username, userType } = useSession();
+  const [params, setParams] = useSearchParams();
+  const projectId = params.get("project");
   const [email, setEmail] = useState("");
   const [listText, setListText] = useState("");
   const [context, setContext] = useState("");
@@ -91,8 +94,6 @@ export function TicketsPage() {
   const [pdfBytes, setPdfBytes] = useState(0);
   const [images, setImages] = useState<{ name: string; data: string; bytes: number }[]>([]);
   const [listMode, setListMode] = useState<"paste" | "pdf">("paste");
-  const [projects, setProjects] = useState<Project[] | null>(null);
-  const [projectId, setProjectId] = useState<string | null>(null);
   const [tickets, setTickets] = useState<Ticket[] | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
   const [runIds, setRunIds] = useState<string[]>([]);
@@ -152,13 +153,20 @@ export function TicketsPage() {
     }
     getJson<Project[]>("/projects")
       .then((rows) => {
-        setProjects(rows);
-        setProjectId((current) => {
-          if (current && rows.some((row) => row.id === current)) {
+        const first = rows[0];
+        if (!first) {
+          setTickets([]);
+          return;
+        }
+        setParams((current) => {
+          const id = current.get("project");
+          if (id && rows.some((row) => row.id === id)) {
             return current;
           }
-          return rows[0]?.id ?? "";
-        });
+          const next = new URLSearchParams(current);
+          next.set("project", first.id);
+          return next;
+        }, { replace: true });
       })
       .catch((err: unknown) => {
         const message = requestError(err, "Something went wrong. Try again.");
@@ -166,7 +174,15 @@ export function TicketsPage() {
           setError(message);
         }
       });
-  }, [username]);
+  }, [username, setParams]);
+
+  useEffect(() => {
+    setTickets(null);
+    setSelected([]);
+    listedIds.current = null;
+    setOpenId(null);
+    setReport(null);
+  }, [projectId]);
 
   useEffect(() => {
     if (username) {
@@ -440,18 +456,6 @@ export function TicketsPage() {
   const bulk = running && !job?.ticket_id;
   const activeId = running ? job?.ticket_id || null : null;
 
-  function selectProject(id: string) {
-    if (id === projectId) {
-      return;
-    }
-    setProjectId(id);
-    setTickets(null);
-    setSelected([]);
-    listedIds.current = null;
-    setOpenId(null);
-    setReport(null);
-  }
-
   return (
       <main className="shell shell-app">
         <div className="page-head">
@@ -459,22 +463,6 @@ export function TicketsPage() {
             <p className="eyebrow">Workspace</p>
             <h1>Resolve tickets</h1>
           </div>
-          {projects && projects.length > 0 ? (
-            <div className="seg" role="tablist" aria-label="Project">
-              {projects.map((project) => (
-                <button
-                  key={project.id}
-                  type="button"
-                  role="tab"
-                  aria-selected={project.id === projectId}
-                  className={project.id === projectId ? "seg-btn on" : "seg-btn"}
-                  onClick={() => selectProject(project.id)}
-                >
-                  {project.product_name || project.name}
-                </button>
-              ))}
-            </div>
-          ) : null}
         </div>
         {error ? (
           <p className="form-error studio-error" role="alert">
@@ -602,7 +590,7 @@ export function TicketsPage() {
             <div className="board-head">
               <h2>Tickets</h2>
             </div>
-            {tickets == null && !error ? <p className="muted">Loading tickets…</p> : null}
+            {tickets == null && projectId && !error ? <p className="muted">Loading tickets…</p> : null}
             {tickets && tickets.length === 0 ? (
               <p className="muted">
                 {running ? "Reading the list…" : "No tickets yet. Add a list, then choose Resolve."}
