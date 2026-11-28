@@ -1,7 +1,7 @@
 """Solve FleetAI from open tickets, or from one instruction. No sign-in.
 
-An instruction is analyzed in the FleetAI checkout, saved as tickets, solved,
-tested, and published by merging fleetai/dev into main. Pushing main is the deploy.
+An instruction starts with a page-by-page product review, then tickets, solve,
+test, and publish by merging fleetai/dev into main. Pushing main is the deploy.
 """
 
 from __future__ import annotations
@@ -19,6 +19,7 @@ import connections
 import db
 import intakes
 import orchestrator
+import reviewer
 import watcher
 from config import (
     COMPLETED,
@@ -468,9 +469,18 @@ def _run_instruction_once(user_id: UUID, project_id: UUID, instruction: str) -> 
             raise RuntimeError("FleetAI checkout is missing")
         if _status(clone).strip():
             raise RuntimeError("FleetAI checkout is dirty")
-        tickets = tickets_from_text(
-            analyze(breakdown_prompt(instruction, context, existing_ids(user_id), run_memory(project_id)))
+        # Page-by-page walkthrough first (like a human), then tickets from findings.
+        planned = reviewer.review_to_tickets(
+            clone, instruction, context, existing_ids(user_id)
         )
+        if _status(clone).strip():
+            raise RuntimeError("page review edited the checkout")
+        try:
+            tickets = tickets_from_text(planned)
+        except RuntimeError:
+            tickets = tickets_from_text(
+                analyze(breakdown_prompt(instruction, context, existing_ids(user_id), run_memory(project_id)))
+            )
         if _status(clone).strip():
             raise RuntimeError("analysis edited the checkout")
         if not tickets:

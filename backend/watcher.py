@@ -31,9 +31,13 @@ When the blocker is fixed, end with exactly one line: WATCH: retry
 If you cannot fix it, end with exactly one line: WATCH: fail
 """
 
-_REVIEW = """You are the FleetAI watcher. Self-improve finished a pass. Double-check the FleetAI checkout
-against the original instruction. Do not commit, push, or deploy. Do not edit files in this step.
-Follow PREVENT. A line there is a mistake that must not be repeated.
+_REVIEW = """You are the FleetAI watcher. Self-improve finished a pass. Walk the product page by page
+(home, login, signup, verify, forgot, reset, terms, workspace, connectors, settings) and double-check
+the checkout against the original instruction and PREVENT. Do not commit, push, or deploy. Do not edit
+files in this step. Follow PREVENT. A line there is a mistake that must not be repeated.
+
+Fail the pass if a public auth/intro page still shows the signed-in product sidebar, if Workspace was
+renamed back to Tickets, or if a named instruction item is still wrong.
 
 PREVENT
 {prevent}
@@ -44,11 +48,12 @@ ORIGINAL INSTRUCTION
 LAST INSTRUCTION RUN
 {current}
 
-If the original instruction is fully met, end with exactly one line: WATCH: ok
+If the original instruction is fully met and the page walk finds no PREVENT/AGENTS breach, end with
+exactly one line: WATCH: ok
 If gaps remain, end with:
 WATCH: again
 INSTRUCTION
-<one follow-up instruction that names what still fails and what to fix>
+<one follow-up instruction that names the pages that still fail and what to fix>
 """
 
 
