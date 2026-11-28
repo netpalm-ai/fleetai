@@ -74,18 +74,31 @@ INSTRUCTION
 """
 
 
-def fleetai_project() -> dict:
+def fleetai_project(user_id: UUID | None = None) -> dict:
     with db.get_pool().connection() as conn:
-        row = conn.execute(
-            """
-            SELECT p.id, p.user_id
-            FROM projects p
-            JOIN project_contexts c ON c.project_id = p.id AND c.user_id = p.user_id
-            WHERE p.name = 'FleetAI' AND c.product_name = 'FleetAI'
-            ORDER BY p.created_at
-            LIMIT 1
-            """
-        ).fetchone()
+        if user_id is None:
+            row = conn.execute(
+                """
+                SELECT p.id, p.user_id
+                FROM projects p
+                JOIN project_contexts c ON c.project_id = p.id AND c.user_id = p.user_id
+                WHERE p.name = 'FleetAI' AND c.product_name = 'FleetAI'
+                ORDER BY p.created_at
+                LIMIT 1
+                """
+            ).fetchone()
+        else:
+            row = conn.execute(
+                """
+                SELECT p.id, p.user_id
+                FROM projects p
+                JOIN project_contexts c ON c.project_id = p.id AND c.user_id = p.user_id
+                WHERE p.name = 'FleetAI' AND c.product_name = 'FleetAI' AND p.user_id = %s
+                ORDER BY p.created_at
+                LIMIT 1
+                """,
+                (user_id,),
+            ).fetchone()
     if row is None:
         raise RuntimeError("FleetAI project is missing")
     return {"id": row["id"], "user_id": row["user_id"]}

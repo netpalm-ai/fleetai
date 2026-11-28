@@ -495,7 +495,7 @@ class TicketStorageTests(unittest.TestCase):
         hidden = self.client.get("/projects")
         self.assertEqual(hidden.status_code, 200, hidden.text)
         self.assertNotIn("FleetAI", [row["name"] for row in hidden.json()])
-        denied = self.client.post("/self-improve", json={"instruction": "improve the tickets page"}, headers=CSRF)
+        denied = self.client.post("/self-improve", json={"instruction": "improve the workspace"}, headers=CSRF)
         self.assertEqual(denied.status_code, 403)
         with db.get_pool().connection() as conn:
             conn.execute("UPDATE users SET user_type = 'admin' WHERE id = %s", (self.user_id,))
@@ -507,22 +507,27 @@ class TicketStorageTests(unittest.TestCase):
         shown = self.client.get("/projects")
         self.assertIn("FleetAI", [row["name"] for row in shown.json()])
         with (
-            patch.object(selflooper, "fleetai_project", return_value={"id": project_id, "user_id": self.user_id}),
+            patch.object(
+                selflooper,
+                "fleetai_project",
+                return_value={"id": project_id, "user_id": self.user_id},
+            ) as find,
             patch.object(selflooper, "refuse_failed_run"),
             patch.object(selflooper, "run_instruction") as run,
         ):
             started = self.client.post(
                 "/self-improve",
-                json={"instruction": "improve the tickets page"},
+                json={"instruction": "improve the workspace"},
                 headers=CSRF,
             )
         self.assertEqual(started.status_code, 202, started.text)
         self.assertEqual(started.json()["kind"], "improve")
-        run.assert_called_once_with(self.user_id, project_id, "improve the tickets page")
+        find.assert_called_once_with(self.user_id)
+        run.assert_called_once_with(self.user_id, project_id, "improve the workspace")
         with db.get_pool().connection() as conn:
             saved = conn.execute(
                 "SELECT kind FROM memories WHERE body = %s",
-                ("improve the tickets page",),
+                ("improve the workspace",),
             ).fetchone()
         self.assertEqual(saved["kind"], "feedback")
 

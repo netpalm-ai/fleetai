@@ -115,9 +115,7 @@ def _run_job(job: dict, user: User, call) -> None:
 def _run_improve(job: dict, user: User, instruction: str) -> None:
     try:
         with config.workflow_lock(user.id, blocking=False):
-            project = selflooper.fleetai_project()
-            if project["user_id"] != user.id:
-                raise RuntimeError("FleetAI project is missing")
+            project = selflooper.fleetai_project(user.id)
             selflooper.refuse_failed_run(project["id"])
             selflooper.run_instruction(user.id, project["id"], instruction)
     except config.WorkflowBusy as exc:
@@ -254,6 +252,7 @@ def post_self_improve(
     body: InstructionBody,
     background: BackgroundTasks,
     user: User = Depends(require_tickets),
+    _: None = Depends(require_csrf),
 ) -> dict:
     if user.user_type != "admin":
         raise HTTPException(403, "forbidden")
@@ -274,7 +273,11 @@ def get_tickets(project_id: UUID | None = None, user: User = Depends(require_tic
 
 
 @app.post("/tickets/inputs", status_code=204, response_model=None)
-def post_inputs(body: IntakeBody, user: User = Depends(require_tickets)) -> None:
+def post_inputs(
+    body: IntakeBody,
+    user: User = Depends(require_tickets),
+    _: None = Depends(require_csrf),
+) -> None:
     pdf = None
     if body.list_pdf_base64:
         try:
@@ -320,7 +323,7 @@ def get_job(job_id: str, user: User = Depends(require_tickets)) -> dict:
 
 
 @app.post("/tickets/parse")
-def parse_tickets(user: User = Depends(require_tickets)) -> list[dict]:
+def parse_tickets(user: User = Depends(require_tickets), _: None = Depends(require_csrf)) -> list[dict]:
     try:
         with config.workflow_lock(user.id, blocking=False):
             return _call(parser.get_tickets, user.id, user.session_id)
@@ -329,19 +332,33 @@ def parse_tickets(user: User = Depends(require_tickets)) -> list[dict]:
 
 
 @app.post("/tickets/{ticket_id}/solve", status_code=202)
-def solve_ticket(ticket_id: str, background: BackgroundTasks, user: User = Depends(require_tickets)) -> dict:
+def solve_ticket(
+    ticket_id: str,
+    background: BackgroundTasks,
+    user: User = Depends(require_tickets),
+    _: None = Depends(require_csrf),
+) -> dict:
     _call(config.require_ticket, user.id, ticket_id)
     return _start_job("solve", lambda: solver.solve(user.id, ticket_id), background, user, ticket_id)
 
 
 @app.post("/tickets/{ticket_id}/verify", status_code=202)
-def verify_ticket(ticket_id: str, background: BackgroundTasks, user: User = Depends(require_tickets)) -> dict:
+def verify_ticket(
+    ticket_id: str,
+    background: BackgroundTasks,
+    user: User = Depends(require_tickets),
+    _: None = Depends(require_csrf),
+) -> dict:
     _call(config.require_ticket, user.id, ticket_id)
     return _start_job("verify", lambda: verifier.verify(user.id, ticket_id), background, user, ticket_id)
 
 
 @app.post("/tickets/{ticket_id}/complete")
-def complete_ticket(ticket_id: str, user: User = Depends(require_tickets)) -> dict:
+def complete_ticket(
+    ticket_id: str,
+    user: User = Depends(require_tickets),
+    _: None = Depends(require_csrf),
+) -> dict:
     try:
         with config.workflow_lock(user.id, blocking=False):
             return _call(solver.complete, user.id, ticket_id)
@@ -354,10 +371,11 @@ def execute(
     background: BackgroundTasks,
     body: ExecuteBody | None = None,
     user: User = Depends(require_tickets),
+    _: None = Depends(require_csrf),
 ) -> dict:
     ticket_ids = [item.strip() for item in (body.ticket_ids if body else []) if item and item.strip()]
     if not ticket_ids:
-        raise HTTPException(400, "Select a ticket.")
+        raise HTTPException(400, "Select one.")
     return _start_job(
         "execute",
         lambda: orchestrator.execute(user.id, user.session_id, ticket_ids),

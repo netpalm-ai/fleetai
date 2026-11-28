@@ -66,7 +66,7 @@ class ApiTests(unittest.TestCase):
 
     def test_parse_returns_tickets(self) -> None:
         with patch.object(api.parser, "get_tickets", return_value=[{"id": "T1"}]) as get_tickets:
-            response = self.client.post("/tickets/parse")
+            response = self.client.post("/tickets/parse", headers=CSRF)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), [{"id": "T1"}])
         get_tickets.assert_called_once_with(USER.id, None)
@@ -75,7 +75,7 @@ class ApiTests(unittest.TestCase):
         with patch.object(api.orchestrator, "execute") as execute:
             response = self.client.post("/execute", json={"ticket_ids": []}, headers=CSRF)
         self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.json()["detail"], "Select a ticket.")
+        self.assertEqual(response.json()["detail"], "Select one.")
         execute.assert_not_called()
 
     def test_execute_returns_job(self) -> None:
@@ -104,13 +104,22 @@ class ApiTests(unittest.TestCase):
 
     def test_complete_maps_system_exit(self) -> None:
         with patch.object(api.solver, "complete", side_effect=SystemExit("ticket T1 is fixed; complete only accepts verifying")):
-            response = self.client.post("/tickets/T1/complete")
+            response = self.client.post("/tickets/T1/complete", headers=CSRF)
         self.assertEqual(response.status_code, 409)
 
     def test_missing_ticket_solve_is_404(self) -> None:
         with patch.object(api.config, "require_ticket", side_effect=SystemExit("ticket not found: T9")):
-            response = self.client.post("/tickets/T9/solve")
+            response = self.client.post("/tickets/T9/solve", headers=CSRF)
         self.assertEqual(response.status_code, 404)
+
+    def test_mutating_routes_require_csrf(self) -> None:
+        self.assertEqual(self.client.post("/tickets/parse").status_code, 403)
+        self.assertEqual(self.client.post("/tickets/inputs", json={"email": "hi"}).status_code, 403)
+        self.assertEqual(self.client.post("/tickets/T1/solve").status_code, 403)
+        self.assertEqual(self.client.post("/tickets/T1/verify").status_code, 403)
+        self.assertEqual(self.client.post("/tickets/T1/complete").status_code, 403)
+        self.assertEqual(self.client.post("/execute", json={"ticket_ids": ["T1"]}).status_code, 403)
+        self.assertEqual(self.client.post("/self-improve", json={"instruction": "tighten the workspace"}).status_code, 403)
 
     def test_missing_job_is_404(self) -> None:
         self.assertEqual(self.client.get("/jobs/missing").status_code, 404)
@@ -164,8 +173,8 @@ class ApiTests(unittest.TestCase):
             last_name="User",
         )
         self.assertEqual(self.client.get("/tickets").status_code, 403)
-        self.assertEqual(self.client.post("/tickets/inputs", json={"email": "hi"}).status_code, 403)
-        self.assertEqual(self.client.post("/execute").status_code, 403)
+        self.assertEqual(self.client.post("/tickets/inputs", json={"email": "hi"}, headers=CSRF).status_code, 403)
+        self.assertEqual(self.client.post("/execute", headers=CSRF).status_code, 403)
         self.assertEqual(self.client.get("/health").status_code, 200)
 
     def test_post_inputs_saves_images(self) -> None:
@@ -183,6 +192,7 @@ class ApiTests(unittest.TestCase):
                         base64.b64encode(webp).decode("ascii"),
                     ],
                 },
+                headers=CSRF,
             )
         self.assertEqual(response.status_code, 204)
         save.assert_called_once_with("", "T1 login fails", "", None, USER.id, None, [png, jpeg, webp])
@@ -192,6 +202,7 @@ class ApiTests(unittest.TestCase):
             response = self.client.post(
                 "/tickets/inputs",
                 json={"list_images_base64": ["@@@@"]},
+                headers=CSRF,
             )
         self.assertEqual(response.status_code, 422)
         save.assert_not_called()
@@ -202,6 +213,7 @@ class ApiTests(unittest.TestCase):
             response = self.client.post(
                 "/tickets/inputs",
                 json={"list_images_base64": [png] * 9},
+                headers=CSRF,
             )
         self.assertEqual(response.status_code, 422)
         save.assert_not_called()
@@ -213,18 +225,19 @@ class ApiTests(unittest.TestCase):
             response = self.client.post(
                 "/tickets/inputs",
                 json={"list_images_base64": [encoded] * 8},
+                headers=CSRF,
             )
         self.assertEqual(response.status_code, 204)
         save.assert_called_once_with("", "", "", None, USER.id, None, [png] * 8)
 
     def test_post_inputs_rejects_empty(self) -> None:
         with patch.object(api.config, "save_intake", side_effect=RuntimeError("need an email or a ticket list")):
-            response = self.client.post("/tickets/inputs", json={})
+            response = self.client.post("/tickets/inputs", json={}, headers=CSRF)
         self.assertEqual(response.status_code, 400)
 
     def test_post_inputs_busy(self) -> None:
         with patch.object(api.config, "save_intake", side_effect=config.WorkflowBusy("workflow busy")):
-            response = self.client.post("/tickets/inputs", json={"email": "hello"})
+            response = self.client.post("/tickets/inputs", json={"email": "hello"}, headers=CSRF)
         self.assertEqual(response.status_code, 409)
 
 
